@@ -9,6 +9,16 @@ import (
 func SetupRouter(r *gin.Engine) {
 	r.GET("/version", VersionHandler)
 
+	{
+		g := r.Group("/api")
+		g.Use(handler.InternalErrorHandler())
+		g.Use(handler.MasterKeyValidationMiddleware())
+
+		g.GET("/providers", handler.ListProviders)
+		g.GET("/api-keys", handler.ListAPIKeys)
+		g.POST("/aliases", handler.ListAliases)
+	}
+
 	// openai
 	{
 		g := r.Group("/v1")
