@@ -46,9 +46,9 @@ func APIKeyValidationMiddleware() gin.HandlerFunc {
 }
 
 func findApiKeyConfig(apiKey string) *config.ApiKeyConfig {
-	for _, apiKeyConfig := range config.GlobalConfig.APIKeys {
+	for _, apiKeyConfig := range config.Get().APIKeys {
 		if apiKeyConfig.Key == apiKey {
-			return &apiKeyConfig
+			return apiKeyConfig
 		}
 	}
 
@@ -57,7 +57,7 @@ func findApiKeyConfig(apiKey string) *config.ApiKeyConfig {
 
 func MasterKeyValidationMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		if config.GlobalConfig.Server.MasterKey == "" {
+		if config.Get().Server.MasterKey == "" {
 			c.Error(Unauthorized.WithMessage("master key not configured"))
 			c.Abort()
 			return
@@ -77,7 +77,7 @@ func MasterKeyValidationMiddleware() gin.HandlerFunc {
 		}
 
 		key := strings.TrimPrefix(authHeader, bearerPrefix)
-		if config.GlobalConfig.Server.MasterKey != key {
+		if config.Get().Server.MasterKey != key {
 			c.Error(Unauthorized.WithMessage("master key is invalid"))
 			c.Abort()
 			return

@@ -107,13 +107,13 @@ type listModelsResp struct {
 }
 
 func ListModelsHandler(c *gin.Context) {
-	modelInfos := make([]modelInfo, 0, len(config.GlobalConfig.Aliases))
+	modelInfos := make([]modelInfo, 0, len(config.Get().Aliases))
 
 	resp := listModelsResp{
 		Object: "list",
 	}
 
-	for model, aliasConfig := range config.GlobalConfig.Aliases {
+	for model, aliasConfig := range config.Get().Aliases {
 		if !aliasConfig.Enabled {
 			continue
 		}
@@ -130,9 +130,9 @@ func ListModelsHandler(c *gin.Context) {
 }
 
 func getAliasedModel(model string) string {
-	for name, modelAlias := range config.GlobalConfig.Aliases {
+	for name, modelAlias := range config.Get().Aliases {
 		if name == model {
-			return modelAlias.Target
+			return fmt.Sprintf("%s/%s", modelAlias.Provider, modelAlias.Model)
 		}
 	}
 
@@ -151,9 +151,9 @@ func parseModel(model string) (string, string, error) {
 }
 
 func findProvider(providerId string) (*config.ProviderConfig, error) {
-	for id, provider := range config.GlobalConfig.Providers {
+	for id, provider := range config.Get().Providers {
 		if id == providerId {
-			return &provider, nil
+			return provider, nil
 		}
 	}
 

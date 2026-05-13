@@ -2,8 +2,8 @@ package config
 
 import (
 	"log/slog"
-	"os"
 
+	"github.com/fsnotify/fsnotify"
 	"github.com/spf13/viper"
 )
 
@@ -52,8 +52,10 @@ type ApiKeyConfig struct {
 type ModelAlias struct {
 	// Name model alias name
 	Name string `json:"name" mapstructure:"name"`
-	// Target target model aliased to
-	Target string `json:"target" mapstructure:"target"`
+	// Provider target provider
+	Provider string `json:"provider" mapstructure:"provider"`
+	// Model model of target provider
+	Model string `json:"model" mapstructure:"model"`
 	// Enabled model alias enabled
 	Enabled bool `json:"enabled" mapstructure:"enabled"`
 }
@@ -61,14 +63,14 @@ type ModelAlias struct {
 type Config struct {
 	Server ServerConfig `json:"server" mapstructure:"server"`
 
-	Providers map[string]ProviderConfig `json:"providers" mapstructure:"providers"`
+	Providers map[string]*ProviderConfig `json:"providers" mapstructure:"providers"`
 
-	Aliases map[string]ModelAlias `json:"aliases" mapstructure:"aliases"`
+	Aliases map[string]*ModelAlias `json:"aliases" mapstructure:"aliases"`
 
-	APIKeys []ApiKeyConfig `json:"api_keys" mapstructure:"api_keys"`
+	APIKeys []*ApiKeyConfig `json:"api_keys" mapstructure:"api_keys"`
 }
 
-var GlobalConfig *Config
+var globalConfig *Config
 
 func LoadConfig() error {
 	viper.SetConfigName("config")
@@ -80,16 +82,52 @@ func LoadConfig() error {
 
 	if err := viper.ReadInConfig(); err != nil {
 		slog.Info("read config failed", "err", err)
-		os.Exit(-1)
+		return err
 	}
 
+	if err := readConfig(); err != nil {
+		slog.Info("read config failed", "err", err)
+		return err
+	}
+
+	viper.WatchConfig()
+	viper.OnConfigChange(func(in fsnotify.Event) {
+		slog.Info("config changed")
+
+		if err := readConfig(); err != nil {
+			slog.Error("unmarshal config failed", "err", err)
+		} else {
+			slog.Info("config updated")
+		}
+	})
+
+	slog.Info("debug config", "config", globalConfig)
+	return nil
+}
+
+func readConfig() error {
 	var config Config
 	if err := viper.Unmarshal(&config); err != nil {
 		return err
 	}
 
-	GlobalConfig = &config
+	globalConfig = &config
 
-	slog.Info("debug config", "config", GlobalConfig)
+	for providerId, provider := range globalConfig.Providers {
+		if provider.ID == "" {
+			provider.ID = providerId
+		}
+	}
+
+	for aliasId, alias := range globalConfig.Aliases {
+		if alias.Name == "" {
+			alias.Name = aliasId
+		}
+	}
+
 	return nil
+}
+
+func Get() *Config {
+	return globalConfig
 }

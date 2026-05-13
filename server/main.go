@@ -5,6 +5,7 @@ import (
 	"llmux/internal"
 	"llmux/internal/config"
 	"log/slog"
+	"os"
 
 	"github.com/gin-gonic/gin"
 )
@@ -13,13 +14,13 @@ func main() {
 	err := config.LoadConfig()
 	if err != nil {
 		slog.Error("load config failed", "err", err)
-		return
+		os.Exit(-1)
 	}
 
 	r := gin.Default()
 	internal.SetupRouter(r)
 
-	addr := fmt.Sprintf(":%d", config.GlobalConfig.Server.Port)
+	addr := fmt.Sprintf(":%d", config.Get().Server.Port)
 	slog.Info("start listening", "addr", addr)
 	r.Run(addr)
 }

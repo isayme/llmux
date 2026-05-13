@@ -8,12 +8,12 @@ import (
 )
 
 type listProviderResp struct {
-	Providers []config.ProviderConfig `json:"providers"`
+	Providers []*config.ProviderConfig `json:"providers"`
 }
 
 func ListProviders(c *gin.Context) {
-	providers := make([]config.ProviderConfig, 0)
-	for _, provider := range config.GlobalConfig.Providers {
+	providers := make([]*config.ProviderConfig, 0)
+	for _, provider := range config.Get().Providers {
 		providers = append(providers, provider)
 	}
 	resp := listProviderResp{
@@ -22,17 +22,24 @@ func ListProviders(c *gin.Context) {
 	c.JSON(http.StatusOK, resp)
 }
 
+type listAPIKeyResp struct {
+	APIKeys []*config.ApiKeyConfig `json:"api_keys"`
+}
+
 func ListAPIKeys(c *gin.Context) {
-	c.JSON(http.StatusOK, config.GlobalConfig.APIKeys)
+	resp := listAPIKeyResp{
+		APIKeys: config.Get().APIKeys,
+	}
+	c.JSON(http.StatusOK, resp)
 }
 
 type listAliasResp struct {
-	Aliases map[string]config.ModelAlias `json:"aliases"`
+	Aliases map[string]*config.ModelAlias `json:"aliases"`
 }
 
 func ListAliases(c *gin.Context) {
-	aliases := make(map[string]config.ModelAlias)
-	for model, alias := range config.GlobalConfig.Aliases {
+	aliases := make(map[string]*config.ModelAlias)
+	for model, alias := range config.Get().Aliases {
 		aliases[model] = alias
 	}
 	resp := listAliasResp{
