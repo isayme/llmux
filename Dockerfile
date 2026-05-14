@@ -25,6 +25,6 @@ FROM alpine
 WORKDIR /app
 
 COPY --from=go-builder /app/dist/llmux /app/llmux
-COPY --from=node-builder /app/dist /app/public
+COPY --from=node-builder /app/dist /app/dist
 
 CMD ["/app/llmux"]
