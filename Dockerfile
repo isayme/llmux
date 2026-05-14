@@ -1,10 +1,17 @@
 FROM golang:1.26-alpine AS go-builder
 WORKDIR /app
 
+ARG APP_NAME
+ENV APP_NAME ${APP_NAME}
+ARG APP_VERSION
+ENV APP_VERSION ${APP_VERSION}
+
 COPY server .
 # RUN mkdir -p ./dist && GO111MODULE=on GOPROXY=https://goproxy.cn,direct go mod download
 RUN mkdir -p ./dist && GO111MODULE=on go mod download
-RUN go build -o ./dist/llmux main.go
+RUN go build -ldflags "-X llmux/internal.Name=${APP_NAME} \
+    -X llmux/internal.Version=${APP_VERSION}" \
+    -o ./dist/llmux main.go
 
 FROM node:24-slim AS node-builder
 WORKDIR /app
