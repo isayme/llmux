@@ -21,6 +21,12 @@ func main() {
 	internal.SetupRouter(r)
 
 	addr := fmt.Sprintf(":%d", config.Get().Server.Port)
+
+	// compatible with vercel portless
+	port := os.Getenv("PORT")
+	if port != "" {
+		addr = fmt.Sprintf(":%s", port)
+	}
 	slog.Info("start listening", "addr", addr)
 	r.Run(addr)
 }

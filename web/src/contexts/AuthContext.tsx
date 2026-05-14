@@ -4,7 +4,7 @@ import { api } from '@/services/api'
 interface AuthContextType {
   isAuthenticated: boolean
   login: (masterKey: string) => Promise<boolean>
-  logout: () => void
+  logout: () => Promise<void>
   isLoading: boolean
 }
 
@@ -16,15 +16,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const checkAuth = async () => {
-      const savedKey = api.getMasterKey()
-      if (savedKey) {
-        try {
-          await api.getProviders()
-          setIsAuthenticated(true)
-        } catch {
-          api.clearMasterKey()
-          setIsAuthenticated(false)
-        }
+      try {
+        const isValid = await api.checkSession()
+        setIsAuthenticated(isValid)
+      } catch {
+        setIsAuthenticated(false)
       }
       setIsLoading(false)
     }
@@ -32,17 +28,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const login = async (masterKey: string): Promise<boolean> => {
-    const isValid = await api.validateMasterKey(masterKey)
-    if (isValid) {
-      api.setMasterKey(masterKey)
+    const success = await api.login(masterKey)
+    if (success) {
       setIsAuthenticated(true)
       return true
     }
     return false
   }
 
-  const logout = () => {
-    api.clearMasterKey()
+  const logout = async () => {
+    await api.logout()
     setIsAuthenticated(false)
   }
 

@@ -1,11 +1,19 @@
 package config
 
 import (
+	"llmux/internal/util"
 	"log/slog"
 
 	"github.com/fsnotify/fsnotify"
 	"github.com/spf13/viper"
 )
+
+type SessionConfig struct {
+	SecretKey  string `json:"secret_key" mapstructure:"secret_key"`
+	CookieName string `json:"cookie_name" mapstructure:"cookie_name"`
+	MaxAge     int    `json:"max_age" mapstructure:"max_age"`
+	Secure     bool   `json:"secure" mapstructure:"secure"`
+}
 
 // ServerConfig server config
 type ServerConfig struct {
@@ -14,6 +22,9 @@ type ServerConfig struct {
 
 	// MasterKey master key used to access web UI APIs
 	MasterKey string `json:"master_key" mapstructure:"master_key"`
+
+	// SessionConfig
+	Session *SessionConfig `json:"session" mapstructure:"session"`
 }
 
 // ProviderConfig provider config
@@ -79,6 +90,8 @@ func LoadConfig() error {
 	viper.AddConfigPath("./config/")
 
 	viper.SetDefault("server.port", "8080")
+	viper.SetDefault("server.session.cookie_name", "llmux_sid")
+	viper.SetDefault("server.session.max_age", 86400)
 
 	if err := viper.ReadInConfig(); err != nil {
 		slog.Info("read config failed", "err", err)
@@ -101,7 +114,6 @@ func LoadConfig() error {
 		}
 	})
 
-	slog.Info("debug config", "config", globalConfig)
 	return nil
 }
 
@@ -123,6 +135,12 @@ func readConfig() error {
 		if alias.Name == "" {
 			alias.Name = aliasId
 		}
+	}
+
+	if globalConfig.Server.Session.SecretKey == "" {
+		secretKey := util.RandomString(8)
+		globalConfig.Server.Session.SecretKey = secretKey
+		slog.Warn("session secret key is empty, generating a random one")
 	}
 
 	return nil

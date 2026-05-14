@@ -10,9 +10,15 @@ func SetupRouter(r *gin.Engine) {
 	r.GET("/version", VersionHandler)
 
 	{
+		r.POST("/api/login", handler.SessionMiddleware(), handler.LoginHandler)
+		r.GET("/api/check", handler.SessionMiddleware(), handler.CheckSessionHandler)
+
 		g := r.Group("/api")
 		g.Use(handler.InternalErrorHandler())
-		g.Use(handler.MasterKeyValidationMiddleware())
+		g.Use(handler.SessionMiddleware())
+		g.Use(handler.SessionValidationMiddleware())
+
+		g.POST("/logout", handler.LogoutHandler)
 
 		g.GET("/providers", handler.ListProviders)
 		g.GET("/api-keys", handler.ListAPIKeys)

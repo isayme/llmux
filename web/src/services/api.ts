@@ -3,33 +3,10 @@ import type { ProvidersResponse, APIKeysResponse, AliasesResponse, VersionInfo }
 const API_BASE = ''
 
 class ApiService {
-  private masterKey: string | null = null
-
-  setMasterKey(key: string) {
-    this.masterKey = key
-    localStorage.setItem('llmux_master_key', key)
-  }
-
-  getMasterKey(): string | null {
-    if (!this.masterKey) {
-      this.masterKey = localStorage.getItem('llmux_master_key')
-    }
-    return this.masterKey
-  }
-
-  clearMasterKey() {
-    this.masterKey = null
-    localStorage.removeItem('llmux_master_key')
-  }
-
   private getHeaders(): HeadersInit {
-    const headers: HeadersInit = {
+    return {
       'Content-Type': 'application/json',
     }
-    if (this.masterKey) {
-      headers['Authorization'] = `Bearer ${this.masterKey}`
-    }
-    return headers
   }
 
   async getVersion(): Promise<VersionInfo> {
@@ -40,12 +17,38 @@ class ApiService {
     return response.json()
   }
 
+  async login(masterKey: string): Promise<boolean> {
+    const response = await fetch(`${API_BASE}/api/login`, {
+      method: 'POST',
+      headers: this.getHeaders(),
+      credentials: 'include',
+      body: JSON.stringify({ master_key: masterKey }),
+    })
+    return response.ok
+  }
+
+  async logout(): Promise<void> {
+    await fetch(`${API_BASE}/api/logout`, {
+      method: 'POST',
+      headers: this.getHeaders(),
+      credentials: 'include',
+    })
+  }
+
+  async checkSession(): Promise<boolean> {
+    const response = await fetch(`${API_BASE}/api/check`, {
+      headers: this.getHeaders(),
+      credentials: 'include',
+    })
+    return response.ok
+  }
+
   async getProviders(): Promise<ProvidersResponse> {
     const response = await fetch(`${API_BASE}/api/providers`, {
       headers: this.getHeaders(),
+      credentials: 'include',
     })
     if (response.status === 401) {
-      this.clearMasterKey()
       throw new Error('Unauthorized')
     }
     if (!response.ok) {
@@ -57,9 +60,9 @@ class ApiService {
   async getAPIKeys(): Promise<APIKeysResponse> {
     const response = await fetch(`${API_BASE}/api/api-keys`, {
       headers: this.getHeaders(),
+      credentials: 'include',
     })
     if (response.status === 401) {
-      this.clearMasterKey()
       throw new Error('Unauthorized')
     }
     if (!response.ok) {
@@ -72,27 +75,15 @@ class ApiService {
     const response = await fetch(`${API_BASE}/api/aliases`, {
       method: 'POST',
       headers: this.getHeaders(),
+      credentials: 'include',
     })
     if (response.status === 401) {
-      this.clearMasterKey()
       throw new Error('Unauthorized')
     }
     if (!response.ok) {
       throw new Error('Failed to fetch aliases')
     }
     return response.json()
-  }
-
-  async validateMasterKey(key: string): Promise<boolean> {
-    const tempKey = this.masterKey
-    this.masterKey = key
-    try {
-      await this.getProviders()
-      return true
-    } catch {
-      this.masterKey = tempKey
-      return false
-    }
   }
 }
 

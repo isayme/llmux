@@ -2,14 +2,18 @@ package handler
 
 import (
 	"llmux/internal/config"
+	"net/http"
 	"strings"
 
+	"github.com/gin-contrib/sessions"
+	"github.com/gin-contrib/sessions/cookie"
 	"github.com/gin-gonic/gin"
 )
 
 const (
 	authorizationHeader = "Authorization"
 	bearerPrefix        = "Bearer "
+	sessionCookieName   = "llmux_session"
 )
 
 func APIKeyValidationMiddleware() gin.HandlerFunc {
@@ -55,31 +59,17 @@ func findApiKeyConfig(apiKey string) *config.ApiKeyConfig {
 	return nil
 }
 
-func MasterKeyValidationMiddleware() gin.HandlerFunc {
+func SessionMiddleware() gin.HandlerFunc {
+	store := cookie.NewStore([]byte(config.Get().Server.Session.SecretKey))
+	return sessions.Sessions(config.Get().Server.Session.CookieName, store)
+}
+
+func SessionValidationMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		if config.Get().Server.MasterKey == "" {
-			c.Error(Unauthorized.WithMessage("master key not configured"))
-			c.Abort()
-			return
-		}
-
-		authHeader := c.GetHeader(authorizationHeader)
-		if authHeader == "" {
-			c.Error(Unauthorized.WithMessage("authorization header is required"))
-			c.Abort()
-			return
-		}
-
-		if !strings.HasPrefix(authHeader, bearerPrefix) {
-			c.Error(Unauthorized.WithMessage("invalid authorization header format"))
-			c.Abort()
-			return
-		}
-
-		key := strings.TrimPrefix(authHeader, bearerPrefix)
-		if config.Get().Server.MasterKey != key {
-			c.Error(Unauthorized.WithMessage("master key is invalid"))
-			c.Abort()
+		session := sessions.Default(c)
+		authed := session.Get("authed")
+		if authed == nil {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "not logged in"})
 			return
 		}
 
