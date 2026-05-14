@@ -3,6 +3,7 @@ package internal
 import (
 	"llmux/internal/handler"
 
+	"github.com/gin-contrib/static"
 	"github.com/gin-gonic/gin"
 )
 
@@ -48,5 +49,9 @@ func SetupRouter(r *gin.Engine) {
 		g.POST("/v1/messages", handler.AnthropicMessagesHandler)
 	}
 
-	r.Static("/admin/", "./dist")
+	// r.Static("/admin/", "./dist")
+	r.Use(static.ServeRoot("/admin/", "./dist"))
+	r.NoRoute(func(c *gin.Context) {
+		c.File("./dist/index.html")
+	})
 }
