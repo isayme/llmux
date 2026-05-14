@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -66,7 +67,7 @@ func ChatCompletionsHandler(c *gin.Context) {
 		return
 	}
 
-	resp, err := forwardRequest(getHttpClient(isStream), provider, c.Request.Method, "/v1/chat/completions", c.Request.Header, req)
+	resp, err := forwardRequest(c.Request.Context(), getHttpClient(isStream), provider, c.Request.Method, "/v1/chat/completions", c.Request.Header, req)
 	if err != nil {
 		c.Error(InternalServerError.WithMessage("forward request failed", err))
 		return
@@ -160,7 +161,7 @@ func findProvider(providerId string) (*config.ProviderConfig, error) {
 	return nil, errors.New("provider not found")
 }
 
-func forwardRequest(httpClient *http.Client, provider *config.ProviderConfig, method, path string, header http.Header, body map[string]interface{}) (*http.Response, error) {
+func forwardRequest(ctx context.Context, httpClient *http.Client, provider *config.ProviderConfig, method, path string, header http.Header, body map[string]interface{}) (*http.Response, error) {
 	url := strings.TrimSuffix(provider.BaseURL, "/") + path
 
 	var bodyReader io.Reader
@@ -168,7 +169,7 @@ func forwardRequest(httpClient *http.Client, provider *config.ProviderConfig, me
 		reqBytes, _ := json.Marshal(body)
 		bodyReader = strings.NewReader(string(reqBytes))
 	}
-	req, err := http.NewRequest(method, url, bodyReader)
+	req, err := http.NewRequestWithContext(ctx, method, url, bodyReader)
 	if err != nil {
 		return nil, err
 	}
@@ -234,7 +235,7 @@ func AnthropicMessagesHandler(c *gin.Context) {
 		return
 	}
 
-	resp, err := forwardRequest(getHttpClient(isStream), provider, c.Request.Method, "/v1/messages", c.Request.Header, req)
+	resp, err := forwardRequest(c.Request.Context(), getHttpClient(isStream), provider, c.Request.Method, "/v1/messages", c.Request.Header, req)
 	if err != nil {
 		c.Error(InternalServerError.WithMessage("forward request failed", err))
 		return
@@ -271,10 +272,18 @@ func getHttpClient(isStream bool) *http.Client {
 }
 
 func proxySse(c *gin.Context, resp *http.Response) {
+	ctx := c.Request.Context()
+
 	flusher, _ := c.Writer.(http.Flusher)
 	reader := resp.Body
 	buf := make([]byte, 4096)
 	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
 		n, err := reader.Read(buf)
 		if n > 0 {
 			c.Writer.Write(buf[:n])
