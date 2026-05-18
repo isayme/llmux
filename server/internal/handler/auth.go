@@ -6,6 +6,7 @@ import (
 
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
+	"golang.org/x/crypto/bcrypt"
 )
 
 func isTLS(c *gin.Context) bool {
@@ -27,7 +28,7 @@ func LoginHandler(c *gin.Context) {
 		return
 	}
 
-	if req.MasterKey != config.Get().Server.MasterKey {
+	if err := bcrypt.CompareHashAndPassword([]byte(config.Get().Server.MasterKey), []byte(req.MasterKey)); err != nil {
 		c.Error(Unauthorized.WithMessage("invalid master key"))
 		return
 	}
