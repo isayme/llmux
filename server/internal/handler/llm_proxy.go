@@ -67,7 +67,7 @@ func ChatCompletionsHandler(c *gin.Context) {
 		return
 	}
 
-	resp, err := forwardRequest(c.Request.Context(), getHttpClient(isStream), provider, c.Request.Method, "/v1/chat/completions", c.Request.Header, req)
+	resp, err := forwardRequest(c.Request.Context(), getHttpClient(isStream), provider, c.Request.Method, "/chat/completions", c.Request.Header, req)
 	if err != nil {
 		c.Error(InternalServerError.WithMessage("forward request failed", err))
 		return
