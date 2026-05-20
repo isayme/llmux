@@ -48,7 +48,7 @@ func handleProxy(c *gin.Context, usedProtocol convert.UsedAIProtocol) {
 		return
 	}
 
-	selector, err := resolveAlias(rawModel)
+	selector, err := resolveModelSelector(rawModel)
 	if err != nil {
 		c.Error(BadRequest.WithMessage("resolve alias failed", err))
 		return
@@ -192,10 +192,10 @@ func ListModelsHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, resp)
 }
 
-func resolveAlias(model string) (selector strategy.ModelSelector, err error) {
-	aliasConfig, found := config.Get().Aliases[model]
+func resolveModelSelector(modelOrAlias string) (selector strategy.ModelSelector, err error) {
+	aliasConfig, found := config.Get().Aliases[modelOrAlias]
 	if !found {
-		parts := strings.SplitN(model, "/", 2)
+		parts := strings.SplitN(modelOrAlias, "/", 2)
 		if len(parts) != 2 {
 			return nil, errors.New("invalid model format, expected alias_name or provider_id/model_name")
 		}
