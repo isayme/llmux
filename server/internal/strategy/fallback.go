@@ -24,5 +24,5 @@ func (s *fallbackSelector) Next() (string, string, bool) {
 
 	m := s.models[s.index]
 	s.index++
-	return m.Provider, m.Model, s.index >= len(s.models)
+	return m.Provider, m.Model, s.index < len(s.models)
 }

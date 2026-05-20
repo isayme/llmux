@@ -62,6 +62,7 @@ func handleProxy(c *gin.Context, usedProtocol convert.UsedAIProtocol) {
 
 	for {
 		providerId, model, canRetry := selector.Next()
+		// slog.Info("using", "provider", providerId, "model", model, "canRetry", canRetry)
 		if providerId == "" {
 			c.Error(NotFound.WithMessage("no available model"))
 			return
@@ -92,6 +93,7 @@ func handleProxy(c *gin.Context, usedProtocol convert.UsedAIProtocol) {
 		resp, err := forwardRequest(c.Request.Context(), getHttpClient(isStream), provider, c.Request.Method, forwardPath, c.Request.Header, forwardBody)
 		if err != nil {
 			if canRetry {
+				// slog.Info("forwardRequest Fail", "err", err)
 				continue
 			}
 			c.Error(InternalServerError.WithMessage("forward request failed", err))
@@ -99,12 +101,21 @@ func handleProxy(c *gin.Context, usedProtocol convert.UsedAIProtocol) {
 		}
 
 		if resp.StatusCode >= 400 {
-			resp.Body.Close()
 			if canRetry {
+				// slog.Info("forwardRequest Fail", "StatusCode", resp.StatusCode)
+				resp.Body.Close()
 				continue
 			}
 			copyResponseHeaders(c, resp.Header)
 			c.Status(resp.StatusCode)
+
+			bs, err := io.ReadAll(resp.Body)
+			if err != nil {
+				c.Error(InternalServerError.WithMessage("read response body failed", err))
+				return
+			}
+			resp.Body.Close()
+			c.Writer.Write(bs)
 			return
 		}
 
@@ -252,6 +263,12 @@ func forwardRequest(ctx context.Context, httpClient *http.Client, provider *conf
 	}
 
 	for key, values := range header {
+		if key == "Content-Length" {
+			continue
+		}
+		if key == "Accept-Encoding" {
+			continue
+		}
 		for _, value := range values {
 			req.Header.Add(key, value)
 		}
