@@ -59,14 +59,23 @@ type ApiKeyConfig struct {
 	Enabled bool `json:"enabled" mapstructure:"enabled"`
 }
 
+type ModelAliasItemConfig struct {
+	Provider string `json:"provider" mapstructure:"provider"`
+	Model    string `json:"model" mapstructure:"model"`
+	Weight   int    `json:"weight" mapstructure:"weight"`
+}
+
 // ModelAlias model alias
 type ModelAlias struct {
 	// Name model alias name
 	Name string `json:"name" mapstructure:"name"`
-	// Provider target provider
-	Provider string `json:"provider" mapstructure:"provider"`
-	// Model model of target provider
-	Model string `json:"model" mapstructure:"model"`
+
+	// Strategy model alias strategy
+	Strategy string `json:"strategy" mapstructure:"strategy"`
+
+	// Models model alias items
+	Models []*ModelAliasItemConfig `json:"models" mapstructure:"models"`
+
 	// Enabled model alias enabled
 	Enabled bool `json:"enabled" mapstructure:"enabled"`
 }

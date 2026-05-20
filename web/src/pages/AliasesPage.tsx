@@ -1,11 +1,11 @@
-import { useState, useEffect } from 'react'
+import { Badge } from '@/components/ui/Badge'
+import { Button } from '@/components/ui/Button'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/Card'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/Table'
 import { api } from '@/services/api'
 import type { Alias } from '@/types'
-import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/Card'
-import { Badge } from '@/components/ui/Badge'
-import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/Table'
-import { GitBranch, RefreshCw, ArrowRight, Copy, Check } from 'lucide-react'
-import { Button } from '@/components/ui/Button'
+import { Check, Copy, GitBranch, RefreshCw } from 'lucide-react'
+import { useEffect, useState } from 'react'
 
 export function AliasesPage() {
   const [aliases, setAliases] = useState<Alias[]>([])
@@ -82,7 +82,8 @@ export function AliasesPage() {
               <TableHeader>
                 <TableRow>
                   <TableHead>Alias Name</TableHead>
-                  <TableHead>Target</TableHead>
+                  <TableHead>Strategy</TableHead>
+                  <TableHead>Models</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
@@ -92,11 +93,24 @@ export function AliasesPage() {
                   <TableRow key={alias.name}>
                     <TableCell className="font-mono text-sm font-medium">{alias.name}</TableCell>
                     <TableCell>
-                      <div className="flex items-center gap-2">
-                        <Badge variant="outline">{alias.provider}</Badge>
-                        <ArrowRight className="h-4 w-4 text-[hsl(var(--muted-foreground))]" />
-                        <span className="font-mono text-sm">{alias.model}</span>
-                      </div>
+                      {alias.strategy ? (
+                        <Badge variant="default">{alias.strategy}</Badge>
+                      ) : (
+                        <span className="text-sm text-[hsl(var(--muted-foreground))]">single</span>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      {alias.models && alias.models.length > 0 ? (
+                        <div className="flex flex-col gap-1">
+                          {alias.models.map((item, idx) => (
+                            <span key={idx} className="font-mono text-sm">
+                              Provider: {item.provider}, Model: {item.model}
+                            </span>
+                          ))}
+                        </div>
+                      ) : (
+                        <span className="text-sm text-[hsl(var(--muted-foreground))]">No models configured</span>
+                      )}
                     </TableCell>
                     <TableCell>
                       <Badge variant={alias.enabled ? 'success' : 'destructive'}>

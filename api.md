@@ -2,7 +2,7 @@
 
 ## 认证
 
-所有管理接口需要通过 `Authorization` Header 传递 Master Key：
+管理接口通过 session cookie 认证（先通过 `/api/login` 登录）或 `Authorization` Header 传递 Master Key：
 
 ```
 Authorization: Bearer <master_key>
@@ -17,6 +17,20 @@ Authorization: Bearer <api_key>
 ---
 
 ## 管理接口
+
+### 登录
+
+```http
+POST /api/login
+```
+
+**请求体：**
+
+```json
+{
+  "master_key": "your-master-key"
+}
+```
 
 ### 获取 Providers 列表
 
@@ -77,13 +91,20 @@ POST /api/aliases
   "aliases": {
     "deepseek-v4-flash": {
       "name": "deepseek-v4-flash",
-      "provider": "sensenova",
-      "model": "deepseek-v4-flash",
+      "strategy": "random",
+      "models": [
+        {"provider": "deepseek", "model": "deepseek-v4-flash", "weight": 0},
+        {"provider": "openrouter", "model": "deepseek/deepseek-v4-flash:free", "weight": 0}
+      ],
       "enabled": true
     }
   }
 }
 ```
+
+**字段说明：**
+- `strategy` — 策略：`"random"`（随机）、`"round_robin"`（轮询）、`"fallback"`（故障转移），空字符串默认使用 round_robin
+- `models` — 模型列表，每项包含 `provider`（提供商标识）、`model`（模型名）、`weight`（权重，目前 fallback 下无影响）
 
 ---
 
@@ -104,6 +125,10 @@ GET /version
 ---
 
 ## LLM 代理接口
+
+### 协议转换说明
+
+LLMux 支持 **双向协议转换**：可以用 OpenAI 协议访问 Anthropic 类型的 Provider，也可以用 Anthropic 协议访问 OpenAI 类型的 Provider。服务端会自动完成请求体和响应体的格式转换（包括 SSE 流式传输）。
 
 ### OpenAI Chat Completions
 
@@ -133,6 +158,7 @@ Content-Type: application/json
 **说明：**
 - `model` 可以是别名名称，也可以是 `provider_id/model_name` 格式
 - 支持 stream 模式
+- 可以访问任意类型的 Provider（OpenAI 或 Anthropic），协议自动转换
 
 ---
 
@@ -177,37 +203,63 @@ POST /anthropic/v1/messages
 ```
 Authorization: Bearer <api_key>
 Content-Type: application/json
+anthropic-version: 2023-06-01
 ```
 
 **请求体：**
 
 ```json
 {
-  "model": "provider_id/model_name",
+  "model": "alias-name",
   "messages": [
     {"role": "user", "content": "Hello"}
   ],
+  "max_tokens": 1024,
   "stream": false
 }
 ```
 
 **说明：**
-- `model` 格式为 `provider_id/model_name`
-- Provider 类型必须为 `anthropic`
+- `model` 可以是别名名称，也可以是 `provider_id/model_name` 格式
 - 支持 stream 模式
+- 可以访问任意类型的 Provider（OpenAI 或 Anthropic），协议自动转换
+- 如果请求头未包含 `anthropic-version`，代理会自动添加 `2023-06-01`
+
+---
+
+### 兼容路径
+
+OpenAI 接口同时挂载在 `/v1/v1/` 路径下，兼容某些客户端的 base_url 拼接：
+
+```http
+POST /v1/v1/chat/completions
+GET  /v1/v1/models
+```
 
 ---
 
 ## 错误响应
 
-错误时返回标准 HTTP 状态码和错误信息：
+### OpenAI 接口错误格式
 
 ```json
 {
   "error": {
     "message": "error message",
-    "type": "invalid_request_error",
-    "code": 400
+    "type": "BadRequest",
+    "code": "BadRequest"
+  }
+}
+```
+
+### Anthropic 接口错误格式
+
+```json
+{
+  "type": "error",
+  "error": {
+    "message": "error message",
+    "type": "BadRequest"
   }
 }
 ```

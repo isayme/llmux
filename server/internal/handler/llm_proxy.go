@@ -7,7 +7,8 @@ import (
 	"fmt"
 	"io"
 	"llmux/internal/config"
-	"llmux/internal/constant"
+	"llmux/internal/handler/convert"
+	"llmux/internal/strategy"
 	"llmux/internal/util"
 	"net/http"
 	"strings"
@@ -17,47 +18,39 @@ import (
 )
 
 var restHttpClient = &http.Client{
-	Timeout: 60 * 1000,
+	Timeout: 60 * time.Second,
 }
 
 var sseHttpClient = &http.Client{
 	Timeout: 0,
 }
 
+var anthropicVersion = "2023-06-01"
+
 func ChatCompletionsHandler(c *gin.Context) {
+	handleProxy(c, convert.ProtocolOpenAI)
+}
+
+func AnthropicMessagesHandler(c *gin.Context) {
+	handleProxy(c, convert.ProtocolAnthropic)
+}
+
+func handleProxy(c *gin.Context, usedProtocol convert.UsedAIProtocol) {
 	var req map[string]interface{}
 	if err := json.NewDecoder(c.Request.Body).Decode(&req); err != nil {
 		c.Error(BadRequest.WithMessage("json parse req body failed", err))
 		return
 	}
 
-	model, err := getModel(req)
+	rawModel, err := getModel(req)
 	if err != nil {
 		c.Error(BadRequest.WithMessage("get model failed", err))
 		return
 	}
 
-	providerId, model, err := parseModel(model)
+	selector, err := resolveAlias(rawModel)
 	if err != nil {
-		c.Error(BadRequest.WithMessage("parse model failed", err))
-		return
-	}
-	// set model for provider
-	req["model"] = model
-
-	provider, err := findProvider(providerId)
-	if err != nil {
-		c.Error(NotFound.WithMessage("provider not found", err))
-		return
-	}
-
-	if !provider.Enabled {
-		c.Error(Forbidden.WithMessage(fmt.Sprintf("provider %s disabled", providerId)))
-		return
-	}
-
-	if provider.Type != constant.ProviderTypeOpenAI {
-		c.Error(BadRequest.WithMessage(fmt.Sprintf("provider it not '%s' type", constant.ProviderTypeOpenAI)))
+		c.Error(BadRequest.WithMessage("resolve alias failed", err))
 		return
 	}
 
@@ -67,32 +60,99 @@ func ChatCompletionsHandler(c *gin.Context) {
 		return
 	}
 
-	resp, err := forwardRequest(c.Request.Context(), getHttpClient(isStream), provider, c.Request.Method, "/chat/completions", c.Request.Header, req)
-	if err != nil {
-		c.Error(InternalServerError.WithMessage("forward request failed", err))
+	for {
+		providerId, model, canRetry := selector.Next()
+		if providerId == "" {
+			c.Error(NotFound.WithMessage("no available model"))
+			return
+		}
+
+		req["model"] = model
+
+		provider, err := findProvider(providerId)
+		if err != nil {
+			c.Error(NotFound.WithMessage("provider not found", err))
+			return
+		}
+
+		if !provider.Enabled {
+			if canRetry {
+				continue
+			}
+			c.Error(Forbidden.WithMessage(fmt.Sprintf("provider %s disabled", providerId)))
+			return
+		}
+
+		forwardBody := convert.ConvertRequestBody(usedProtocol, provider.Type, req)
+
+		forwardPath := getProviderPath(provider.Type)
+
+		resp, err := forwardRequest(c.Request.Context(), getHttpClient(isStream), provider, c.Request.Method, forwardPath, c.Request.Header, forwardBody)
+		if err != nil {
+			if canRetry {
+				continue
+			}
+			c.Error(InternalServerError.WithMessage("forward request failed", err))
+			return
+		}
+
+		if resp.StatusCode >= 400 {
+			resp.Body.Close()
+			if canRetry {
+				continue
+			}
+			copyResponseHeaders(c, resp.Header)
+			c.Status(resp.StatusCode)
+			return
+		}
+
+		defer resp.Body.Close()
+
+		if isStream {
+			respBody := convert.ConvertResponseStream(usedProtocol, provider.Type, resp.Body)
+			copyResponseHeaders(c, resp.Header)
+			c.Status(resp.StatusCode)
+			proxySseReader(c, respBody)
+			return
+		}
+
+		respBody, err := io.ReadAll(resp.Body)
+		if err != nil {
+			c.Error(InternalServerError.WithMessage("read response body failed", err))
+			return
+		}
+
+		respBody, err = convert.ConvertResponseBody(usedProtocol, provider.Type, respBody)
+		if err != nil {
+			c.Error(InternalServerError.WithMessage("convert response body failed", err))
+			return
+		}
+
+		copyResponseHeaders(c, resp.Header)
+		c.Status(resp.StatusCode)
+		c.Writer.Write(respBody)
 		return
 	}
-	defer resp.Body.Close()
+}
 
-	for key, values := range resp.Header {
+// copyResponseHeaders copies upstream response headers to the client.
+// When converted is true, headers that would conflict with the transformed
+// body (Content-Length, Content-Encoding) are stripped.
+func copyResponseHeaders(c *gin.Context, upstream http.Header) {
+	for key, values := range upstream {
+		switch key {
+		case "Content-Length":
+			// Body size changed after protocol conversion.
+			continue
+		case "Content-Encoding":
+			// Body was decompressed by the HTTP client, then re-encoded
+			// as raw JSON after conversion.
+			continue
+		}
 		for _, value := range values {
 			c.Header(key, value)
 		}
 	}
-	c.Status(resp.StatusCode)
-
-	if isStream {
-		proxySse(c, resp)
-		return
-	}
-
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		c.Error(InternalServerError.WithMessage("read response body failed", err))
-		return
-	}
-
-	c.Writer.Write(respBody)
 }
 
 type modelInfo struct {
@@ -130,25 +190,33 @@ func ListModelsHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, resp)
 }
 
-func getAliasedModel(model string) string {
-	for name, modelAlias := range config.Get().Aliases {
-		if name == model {
-			return fmt.Sprintf("%s/%s", modelAlias.Provider, modelAlias.Model)
+func resolveAlias(model string) (selector strategy.ModelSelector, err error) {
+	aliasConfig, found := config.Get().Aliases[model]
+	if !found {
+		parts := strings.SplitN(model, "/", 2)
+		if len(parts) != 2 {
+			return nil, errors.New("invalid model format, expected alias_name or provider_id/model_name")
 		}
+		models := []*config.ModelAliasItemConfig{
+			{
+				Provider: parts[0],
+				Model:    parts[1],
+				Weight:   1,
+			},
+		}
+		return strategy.NewSelector("round_robin", models), nil
 	}
 
-	return model
-}
-
-func parseModel(model string) (string, string, error) {
-	model = getAliasedModel(model)
-
-	parts := strings.SplitN(model, "/", 2)
-	if len(parts) != 2 {
-		return "", "", errors.New("invalid model format")
+	if !aliasConfig.Enabled {
+		return nil, errors.New("alias disabled")
 	}
 
-	return parts[0], parts[1], nil
+	if len(aliasConfig.Models) > 0 {
+		selector = strategy.NewSelector(aliasConfig.Strategy, aliasConfig.Models)
+		return selector, nil
+	}
+
+	return nil, errors.New("alias has no models configured")
 }
 
 func findProvider(providerId string) (*config.ProviderConfig, error) {
@@ -159,6 +227,13 @@ func findProvider(providerId string) (*config.ProviderConfig, error) {
 	}
 
 	return nil, errors.New("provider not found")
+}
+
+func getProviderPath(providerType string) string {
+	if providerType == "anthropic" {
+		return "/v1/messages"
+	}
+	return "/chat/completions"
 }
 
 func forwardRequest(ctx context.Context, httpClient *http.Client, provider *config.ProviderConfig, method, path string, header http.Header, body map[string]interface{}) (*http.Response, error) {
@@ -182,6 +257,12 @@ func forwardRequest(ctx context.Context, httpClient *http.Client, provider *conf
 
 	req.Header.Set("Authorization", bearerPrefix+provider.APIKey)
 
+	if provider.Type == "anthropic" {
+		if req.Header.Get("anthropic-version") == "" {
+			req.Header.Set("anthropic-version", anthropicVersion)
+		}
+	}
+
 	return httpClient.Do(req)
 }
 
@@ -193,76 +274,6 @@ func isStream(reqBody map[string]interface{}) (bool, error) {
 	return util.GetBool(reqBody, "stream")
 }
 
-func AnthropicMessagesHandler(c *gin.Context) {
-	var req map[string]interface{}
-	if err := json.NewDecoder(c.Request.Body).Decode(&req); err != nil {
-		c.Error(BadRequest.WithMessage("json parse req body failed", err))
-		return
-	}
-
-	model, err := getModel(req)
-	if err != nil {
-		c.Error(BadRequest.WithMessage("get model failed", err))
-		return
-	}
-
-	providerId, model, err := parseModel(model)
-	if err != nil {
-		c.Error(BadRequest.WithMessage("parse model failed", err))
-		return
-	}
-	req["model"] = model
-
-	provider, err := findProvider(providerId)
-	if err != nil {
-		c.Error(NotFound.WithMessage("provider not found", err))
-		return
-	}
-
-	if !provider.Enabled {
-		c.Error(Forbidden.WithMessage(fmt.Sprintf("provider %s disabled", providerId)))
-		return
-	}
-
-	if provider.Type != constant.ProviderTypeAnthropic {
-		c.Error(BadRequest.WithMessage(fmt.Sprintf("provider it not '%s' type", constant.ProviderTypeAnthropic)))
-		return
-	}
-
-	isStream, err := isStream(req)
-	if err != nil {
-		c.Error(BadRequest.WithMessage("get stream failed", err))
-		return
-	}
-
-	resp, err := forwardRequest(c.Request.Context(), getHttpClient(isStream), provider, c.Request.Method, "/v1/messages", c.Request.Header, req)
-	if err != nil {
-		c.Error(InternalServerError.WithMessage("forward request failed", err))
-		return
-	}
-	defer resp.Body.Close()
-
-	for key, values := range resp.Header {
-		for _, value := range values {
-			c.Header(key, value)
-		}
-	}
-	c.Status(resp.StatusCode)
-
-	if isStream {
-		proxySse(c, resp)
-		return
-	}
-
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		c.Error(InternalServerError.WithMessage("read response body failed", err))
-		return
-	}
-
-	c.Writer.Write(respBody)
-}
-
 func getHttpClient(isStream bool) *http.Client {
 	if isStream {
 		return sseHttpClient
@@ -272,10 +283,13 @@ func getHttpClient(isStream bool) *http.Client {
 }
 
 func proxySse(c *gin.Context, resp *http.Response) {
+	proxySseReader(c, resp.Body)
+}
+
+func proxySseReader(c *gin.Context, reader io.Reader) {
 	ctx := c.Request.Context()
 
 	flusher, _ := c.Writer.(http.Flusher)
-	reader := resp.Body
 	buf := make([]byte, 4096)
 	for {
 		select {

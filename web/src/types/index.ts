@@ -13,10 +13,16 @@ export interface APIKey {
   enabled: boolean
 }
 
-export interface Alias {
-  name: string
+export interface ModelAliasItem {
   provider: string
   model: string
+  weight: number
+}
+
+export interface Alias {
+  name: string
+  strategy?: string
+  models?: ModelAliasItem[]
   enabled: boolean
 }
 

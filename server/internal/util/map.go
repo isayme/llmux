@@ -19,7 +19,7 @@ func GetString(m map[string]interface{}, key string) (string, error) {
 func GetBool(m map[string]interface{}, key string) (bool, error) {
 	v := m[key]
 	if v == nil {
-		return false, fmt.Errorf("%s is required", key)
+		return false, nil
 	}
 
 	b, ok := v.(bool)
