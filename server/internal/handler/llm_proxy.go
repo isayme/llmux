@@ -83,7 +83,9 @@ func handleProxy(c *gin.Context, usedProtocol convert.UsedAIProtocol) {
 			return
 		}
 
-		forwardBody := convert.ConvertRequestBody(usedProtocol, provider.Type, req)
+		converter := convert.GetConverter(usedProtocol, provider.Type)
+
+		forwardBody := converter.ConvertRequest(req)
 
 		forwardPath := getProviderPath(provider.Type)
 
@@ -109,10 +111,10 @@ func handleProxy(c *gin.Context, usedProtocol convert.UsedAIProtocol) {
 		defer resp.Body.Close()
 
 		if isStream {
-			respBody := convert.ConvertResponseStream(usedProtocol, provider.Type, resp.Body)
+			reader := converter.ConvertSSE(resp.Body)
 			copyResponseHeaders(c, resp.Header)
 			c.Status(resp.StatusCode)
-			proxySseReader(c, respBody)
+			proxySseReader(c, reader)
 			return
 		}
 
@@ -122,7 +124,7 @@ func handleProxy(c *gin.Context, usedProtocol convert.UsedAIProtocol) {
 			return
 		}
 
-		respBody, err = convert.ConvertResponseBody(usedProtocol, provider.Type, respBody)
+		respBody, err = converter.ConvertResponse(respBody)
 		if err != nil {
 			c.Error(InternalServerError.WithMessage("convert response body failed", err))
 			return
