@@ -2,6 +2,7 @@ package internal
 
 import (
 	"llmux/internal/handler"
+	"net/http"
 
 	"github.com/gin-contrib/static"
 	"github.com/gin-gonic/gin"
@@ -9,6 +10,10 @@ import (
 
 func SetupRouter(r *gin.Engine) {
 	proxyHandler := handler.NewProxyHandler()
+
+	r.GET("/", func(c *gin.Context) {
+		c.Redirect(http.StatusTemporaryRedirect, "/admin")
+	})
 
 	r.GET("/version", VersionHandler)
 
