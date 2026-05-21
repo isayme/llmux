@@ -12,7 +12,6 @@ type SessionConfig struct {
 	SecretKey  string `json:"secret_key" mapstructure:"secret_key"`
 	CookieName string `json:"cookie_name" mapstructure:"cookie_name"`
 	MaxAge     int    `json:"max_age" mapstructure:"max_age"`
-	Secure     bool   `json:"secure" mapstructure:"secure"`
 }
 
 // ServerConfig server config

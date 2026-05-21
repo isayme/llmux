@@ -36,6 +36,7 @@ func LoginHandler(c *gin.Context) {
 	session := sessions.Default(c)
 	session.Set("authed", true)
 	session.Options(sessions.Options{
+		MaxAge:   config.Get().Server.Session.MaxAge,
 		Path:     "/",
 		HttpOnly: true,     // Prevent JavaScript access
 		Secure:   isTLS(c), // Only send over HTTPS
