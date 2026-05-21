@@ -227,17 +227,6 @@ anthropic-version: 2023-06-01
 
 ---
 
-### 兼容路径
-
-OpenAI 接口同时挂载在 `/v1/v1/` 路径下，兼容某些客户端的 base_url 拼接：
-
-```http
-POST /v1/v1/chat/completions
-GET  /v1/v1/models
-```
-
----
-
 ## 错误响应
 
 ### OpenAI 接口错误格式

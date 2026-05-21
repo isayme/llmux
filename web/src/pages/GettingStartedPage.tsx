@@ -1,7 +1,7 @@
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/Card'
-import { Copy, Check, BookOpen, Terminal, Code2 } from 'lucide-react'
-import { useState } from 'react'
-import { Button } from '@/components/ui/Button'
+import { Button } from '@/components/ui/Button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/Card';
+import { BookOpen, Check, Code2, Copy, Terminal } from 'lucide-react';
+import { useState } from 'react';
 
 function CodeBlock({ code, language }: { code: string; language?: string }) {
   const [copied, setCopied] = useState(false)
@@ -111,8 +111,7 @@ for chunk in response:
             <CodeBlock
               language="plain"
               code={`POST ${baseURL}/v1/chat/completions    # Chat completions (streaming supported)
-GET  ${baseURL}/v1/models               # List available models
-POST ${baseURL}/v1/v1/chat/completions   # Compatible path`}
+GET  ${baseURL}/v1/models               # List available models`}
             />
           </div>
         </CardContent>

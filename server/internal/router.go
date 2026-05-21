@@ -42,10 +42,6 @@ func SetupRouter(r *gin.Engine) {
 
 		g.POST("/chat/completions", proxyHandler.ChatCompletionsHandler)
 		g.GET("/models", proxyHandler.ListModelsHandler)
-
-		compatibleGroup := g.Group("/v1")
-		compatibleGroup.POST("/chat/completions", proxyHandler.ChatCompletionsHandler)
-		compatibleGroup.GET("/models", proxyHandler.ListModelsHandler)
 	}
 
 	// anthropic
