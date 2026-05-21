@@ -3,6 +3,7 @@ import { AuthProvider, useAuth } from '@/contexts/AuthContext'
 import { ThemeProvider } from '@/contexts/ThemeContext'
 import { APIKeysPage } from '@/pages/APIKeysPage'
 import { AliasesPage } from '@/pages/AliasesPage'
+import { GettingStartedPage } from '@/pages/GettingStartedPage'
 import { LoginPage } from '@/pages/LoginPage'
 import { ProvidersPage } from '@/pages/ProvidersPage'
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
@@ -43,7 +44,7 @@ function PublicRoute({ children }: { children: React.ReactNode }) {
   }
 
   if (isAuthenticated) {
-    return <Navigate to="/providers" replace />
+    return <Navigate to="/" replace />
   }
 
   return <>{children}</>
@@ -68,7 +69,7 @@ function AppRoutes() {
           </ProtectedRoute>
         }
       >
-        <Route index element={<Navigate to="/providers" replace />} />
+        <Route index element={<GettingStartedPage />} />
         <Route path="providers" element={<ProvidersPage />} />
         <Route path="api-keys" element={<APIKeysPage />} />
         <Route path="aliases" element={<AliasesPage />} />

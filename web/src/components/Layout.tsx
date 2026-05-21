@@ -13,11 +13,13 @@ import {
   LogOut,
   Menu,
   X,
+  Home,
 } from 'lucide-react'
 import { useState, useEffect } from 'react'
 import { api } from '@/services/api'
 
 const navItems = [
+  { to: '/', label: 'Home', icon: Home },
   { to: '/providers', label: 'Providers', icon: Server },
   { to: '/api-keys', label: 'API Keys', icon: Key },
   { to: '/aliases', label: 'Aliases', icon: GitBranch },
@@ -54,7 +56,7 @@ export function Layout() {
       {/* Sidebar */}
       <aside
         className={cn(
-          'fixed inset-y-0 left-0 z-50 w-64 transform bg-[hsl(var(--card))] border-r border-[hsl(var(--border))] transition-transform lg:static lg:translate-x-0',
+          'fixed inset-y-0 left-0 z-50 w-64 transform bg-[hsl(var(--card))] border-r border-[hsl(var(--border))] transition-transform lg:sticky lg:top-0 lg:h-screen lg:translate-x-0',
           sidebarOpen ? 'translate-x-0' : '-translate-x-full'
         )}
       >
@@ -123,7 +125,7 @@ export function Layout() {
       </aside>
 
       {/* Main content */}
-      <div className="flex-1">
+      <div className="flex-1 min-w-0">
         {/* Mobile header */}
         <header className="sticky top-0 z-30 flex h-16 items-center gap-4 border-b border-[hsl(var(--border))] bg-[hsl(var(--background))] px-4 lg:hidden">
           <button

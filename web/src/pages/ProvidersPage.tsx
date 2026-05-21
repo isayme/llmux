@@ -88,15 +88,15 @@ export function ProvidersPage() {
                     <TableCell>
                       <Badge variant="outline">{provider.type}</Badge>
                     </TableCell>
-                    <TableCell>
+                    <TableCell className="max-w-xs">
                       <a
                         href={provider.base_url}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="flex items-center gap-1 text-[hsl(var(--primary))] hover:underline"
+                        className="flex items-center gap-1 text-[hsl(var(--primary))] hover:underline break-all"
                       >
                         {provider.base_url}
-                        <ExternalLink className="h-3 w-3" />
+                        <ExternalLink className="h-3 w-3 shrink-0" />
                       </a>
                     </TableCell>
                     <TableCell>
