@@ -4,13 +4,14 @@ import type { Provider } from '@/types'
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/Table'
-import { Server, RefreshCw, ExternalLink } from 'lucide-react'
+import { Server, RefreshCw, ExternalLink, Copy, Check } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 
 export function ProvidersPage() {
   const [providers, setProviders] = useState<Provider[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState('')
+  const [copiedId, setCopiedId] = useState<string | null>(null)
 
   const fetchProviders = async () => {
     setIsLoading(true)
@@ -29,6 +30,12 @@ export function ProvidersPage() {
   useEffect(() => {
     fetchProviders()
   }, [])
+
+  const copyToClipboard = async (id: string) => {
+    await navigator.clipboard.writeText(id)
+    setCopiedId(id)
+    setTimeout(() => setCopiedId(null), 2000)
+  }
 
   return (
     <div className="space-y-6">
@@ -83,7 +90,18 @@ export function ProvidersPage() {
               <TableBody>
                 {providers.map((provider) => (
                   <TableRow key={provider.id}>
-                    <TableCell className="font-mono text-sm">{provider.id}</TableCell>
+                    <TableCell className="font-mono text-sm">
+                      <span className="flex items-center gap-1">
+                        {provider.id}
+                        <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => copyToClipboard(provider.id)}>
+                          {copiedId === provider.id ? (
+                            <Check className="h-3.5 w-3.5 text-[hsl(var(--success))]" />
+                          ) : (
+                            <Copy className="h-3.5 w-3.5" />
+                          )}
+                        </Button>
+                      </span>
+                    </TableCell>
                     <TableCell className="font-medium">{provider.name || provider.id}</TableCell>
                     <TableCell>
                       <Badge variant="outline">{provider.type}</Badge>

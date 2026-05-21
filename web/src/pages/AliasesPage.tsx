@@ -85,13 +85,23 @@ export function AliasesPage() {
                   <TableHead>Strategy</TableHead>
                   <TableHead>Models</TableHead>
                   <TableHead>Status</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {aliases.map((alias) => (
                   <TableRow key={alias.name}>
-                    <TableCell className="font-mono text-sm font-medium">{alias.name}</TableCell>
+                    <TableCell className="font-mono text-sm font-medium">
+                      <span className="flex items-center gap-1">
+                        {alias.name}
+                        <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => copyToClipboard(alias.name)}>
+                          {copiedAlias === alias.name ? (
+                            <Check className="h-3.5 w-3.5 text-[hsl(var(--success))]" />
+                          ) : (
+                            <Copy className="h-3.5 w-3.5" />
+                          )}
+                        </Button>
+                      </span>
+                    </TableCell>
                     <TableCell>
                       {alias.strategy ? (
                         <Badge variant="default">{alias.strategy}</Badge>
@@ -116,19 +126,6 @@ export function AliasesPage() {
                       <Badge variant={alias.enabled ? 'success' : 'destructive'}>
                         {alias.enabled ? 'Enabled' : 'Disabled'}
                       </Badge>
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => copyToClipboard(alias.name)}
-                      >
-                        {copiedAlias === alias.name ? (
-                          <Check className="h-4 w-4 text-[hsl(var(--success))]" />
-                        ) : (
-                          <Copy className="h-4 w-4" />
-                        )}
-                      </Button>
                     </TableCell>
                   </TableRow>
                 ))}

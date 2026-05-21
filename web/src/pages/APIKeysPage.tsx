@@ -101,46 +101,45 @@ export function APIKeysPage() {
                   <TableHead>Name</TableHead>
                   <TableHead>Key</TableHead>
                   <TableHead>Status</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {apiKeys.map((apiKey) => (
                   <TableRow key={apiKey.key}>
                     <TableCell className="font-medium">{apiKey.name || '-'}</TableCell>
-                    <TableCell className="font-mono text-sm">
-                      {visibleKeys.has(apiKey.key) ? apiKey.key : maskKey(apiKey.key)}
+                    <TableCell className="font-mono text-sm max-w-xs">
+                      <span className="flex items-center gap-1 break-all">
+                        <span>{visibleKeys.has(apiKey.key) ? apiKey.key : maskKey(apiKey.key)}</span>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 w-6 p-0 shrink-0"
+                          onClick={() => toggleKeyVisibility(apiKey.key)}
+                        >
+                          {visibleKeys.has(apiKey.key) ? (
+                            <EyeOff className="h-3.5 w-3.5" />
+                          ) : (
+                            <Eye className="h-3.5 w-3.5" />
+                          )}
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 w-6 p-0 shrink-0"
+                          onClick={() => copyToClipboard(apiKey.key)}
+                        >
+                          {copiedKey === apiKey.key ? (
+                            <Check className="h-3.5 w-3.5 text-[hsl(var(--success))]" />
+                          ) : (
+                            <Copy className="h-3.5 w-3.5" />
+                          )}
+                        </Button>
+                      </span>
                     </TableCell>
                     <TableCell>
                       <Badge variant={apiKey.enabled ? 'success' : 'destructive'}>
                         {apiKey.enabled ? 'Enabled' : 'Disabled'}
                       </Badge>
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <div className="flex items-center justify-end gap-2">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => toggleKeyVisibility(apiKey.key)}
-                        >
-                          {visibleKeys.has(apiKey.key) ? (
-                            <EyeOff className="h-4 w-4" />
-                          ) : (
-                            <Eye className="h-4 w-4" />
-                          )}
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => copyToClipboard(apiKey.key)}
-                        >
-                          {copiedKey === apiKey.key ? (
-                            <Check className="h-4 w-4 text-[hsl(var(--success))]" />
-                          ) : (
-                            <Copy className="h-4 w-4" />
-                          )}
-                        </Button>
-                      </div>
                     </TableCell>
                   </TableRow>
                 ))}
