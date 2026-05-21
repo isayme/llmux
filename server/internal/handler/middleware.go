@@ -14,7 +14,16 @@ const (
 	authorizationHeader = "Authorization"
 	bearerPrefix        = "Bearer "
 	sessionCookieName   = "llmux_session"
+	apiKeyCtxKey        = "apiKey"
 )
+
+func GetAPIKey(c *gin.Context) string {
+	key, _ := c.Get(apiKeyCtxKey)
+	if key == nil {
+		return ""
+	}
+	return key.(string)
+}
 
 func APIKeyValidationMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -45,6 +54,7 @@ func APIKeyValidationMiddleware() gin.HandlerFunc {
 			return
 		}
 
+		c.Set(apiKeyCtxKey, apiKey)
 		c.Next()
 	}
 }

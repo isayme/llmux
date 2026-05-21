@@ -12,9 +12,11 @@ import (
 	"llmux/internal/util"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/patrickmn/go-cache"
 )
 
 var restHttpClient = &http.Client{
@@ -27,15 +29,53 @@ var sseHttpClient = &http.Client{
 
 var anthropicVersion = "2023-06-01"
 
-func ChatCompletionsHandler(c *gin.Context) {
-	handleProxy(c, convert.ProtocolOpenAI)
+// ProxyHandler handles LLM proxy requests. It caches model selectors per alias
+// so that stateful strategies (round-robin) work correctly across requests.
+// Cached selectors expire after 10 minutes of inactivity to prevent unbounded
+// memory growth when aliases or API keys are removed.
+type ProxyHandler struct {
+	selectorMu    sync.Mutex
+	selectorCache *cache.Cache
 }
 
-func AnthropicMessagesHandler(c *gin.Context) {
-	handleProxy(c, convert.ProtocolAnthropic)
+func NewProxyHandler() *ProxyHandler {
+	return &ProxyHandler{
+		selectorCache: cache.New(10*time.Minute, 5*time.Minute),
+	}
 }
 
-func handleProxy(c *gin.Context, usedProtocol convert.UsedAIProtocol) {
+func (h *ProxyHandler) ChatCompletionsHandler(c *gin.Context) {
+	h.handleProxy(c, convert.ProtocolOpenAI)
+}
+
+func (h *ProxyHandler) AnthropicMessagesHandler(c *gin.Context) {
+	h.handleProxy(c, convert.ProtocolAnthropic)
+}
+
+func (h *ProxyHandler) ListModelsHandler(c *gin.Context) {
+	modelInfos := make([]modelInfo, 0, len(config.Get().Aliases))
+
+	resp := listModelsResp{
+		Object: "list",
+	}
+
+	for model, aliasConfig := range config.Get().Aliases {
+		if !aliasConfig.Enabled {
+			continue
+		}
+		modelInfos = append(modelInfos, modelInfo{
+			ID:      model,
+			Object:  "model",
+			OwnedBy: "llmux",
+			Created: time.Now().Unix(),
+		})
+	}
+	resp.Data = modelInfos
+
+	c.JSON(http.StatusOK, resp)
+}
+
+func (h *ProxyHandler) handleProxy(c *gin.Context, usedProtocol convert.UsedAIProtocol) {
 	var req map[string]interface{}
 	if err := json.NewDecoder(c.Request.Body).Decode(&req); err != nil {
 		c.Error(BadRequest.WithMessage("json parse req body failed", err))
@@ -48,7 +88,7 @@ func handleProxy(c *gin.Context, usedProtocol convert.UsedAIProtocol) {
 		return
 	}
 
-	selector, err := resolveModelSelector(rawModel)
+	selector, err := h.resolveModelSelector(c, rawModel)
 	if err != nil {
 		c.Error(BadRequest.WithMessage("resolve alias failed", err))
 		return
@@ -62,7 +102,6 @@ func handleProxy(c *gin.Context, usedProtocol convert.UsedAIProtocol) {
 
 	for {
 		providerId, model, canRetry := selector.Next()
-		// slog.Info("using", "provider", providerId, "model", model, "canRetry", canRetry)
 		if providerId == "" {
 			c.Error(NotFound.WithMessage("no available model"))
 			return
@@ -93,7 +132,6 @@ func handleProxy(c *gin.Context, usedProtocol convert.UsedAIProtocol) {
 		resp, err := forwardRequest(c.Request.Context(), getHttpClient(isStream), provider, c.Request.Method, forwardPath, c.Request.Header, forwardBody)
 		if err != nil {
 			if canRetry {
-				// slog.Info("forwardRequest Fail", "err", err)
 				continue
 			}
 			c.Error(InternalServerError.WithMessage("forward request failed", err))
@@ -102,7 +140,6 @@ func handleProxy(c *gin.Context, usedProtocol convert.UsedAIProtocol) {
 
 		if resp.StatusCode >= 400 {
 			if canRetry {
-				// slog.Info("forwardRequest Fail", "StatusCode", resp.StatusCode)
 				resp.Body.Close()
 				continue
 			}
@@ -125,7 +162,7 @@ func handleProxy(c *gin.Context, usedProtocol convert.UsedAIProtocol) {
 			reader := converter.ConvertSSE(resp.Body)
 			copyResponseHeaders(c, resp.Header)
 			c.Status(resp.StatusCode)
-			proxySseReader(c, reader)
+			proxySSE(c, reader)
 			return
 		}
 
@@ -148,62 +185,10 @@ func handleProxy(c *gin.Context, usedProtocol convert.UsedAIProtocol) {
 	}
 }
 
-// copyResponseHeaders copies upstream response headers to the client.
-// When converted is true, headers that would conflict with the transformed
-// body (Content-Length, Content-Encoding) are stripped.
-func copyResponseHeaders(c *gin.Context, upstream http.Header) {
-	for key, values := range upstream {
-		switch key {
-		case "Content-Length":
-			// Body size changed after protocol conversion.
-			continue
-		case "Content-Encoding":
-			// Body was decompressed by the HTTP client, then re-encoded
-			// as raw JSON after conversion.
-			continue
-		}
-		for _, value := range values {
-			c.Header(key, value)
-		}
-	}
-}
-
-type modelInfo struct {
-	ID      string `json:"id"`
-	Object  string `json:"object"`
-	OwnedBy string `json:"owned_by"`
-	Created int64  `json:"created"`
-}
-
-type listModelsResp struct {
-	Object string      `json:"object"`
-	Data   []modelInfo `json:"data"`
-}
-
-func ListModelsHandler(c *gin.Context) {
-	modelInfos := make([]modelInfo, 0, len(config.Get().Aliases))
-
-	resp := listModelsResp{
-		Object: "list",
-	}
-
-	for model, aliasConfig := range config.Get().Aliases {
-		if !aliasConfig.Enabled {
-			continue
-		}
-		modelInfos = append(modelInfos, modelInfo{
-			ID:      model,
-			Object:  "model",
-			OwnedBy: "llmux",
-			Created: time.Now().Unix(),
-		})
-	}
-	resp.Data = modelInfos
-
-	c.JSON(http.StatusOK, resp)
-}
-
-func resolveModelSelector(modelOrAlias string) (selector strategy.ModelSelector, err error) {
+// resolveModelSelector resolves a model name or alias to a ModelSelector.
+// Selectors for aliases are cached on the ProxyHandler, keyed by API key + alias
+// so different API keys get independent selector state (e.g. round-robin position).
+func (h *ProxyHandler) resolveModelSelector(c *gin.Context, modelOrAlias string) (strategy.ModelSelector, error) {
 	aliasConfig, found := config.Get().Aliases[modelOrAlias]
 	if !found {
 		parts := strings.SplitN(modelOrAlias, "/", 2)
@@ -224,12 +209,49 @@ func resolveModelSelector(modelOrAlias string) (selector strategy.ModelSelector,
 		return nil, errors.New("alias disabled")
 	}
 
-	if len(aliasConfig.Models) > 0 {
-		selector = strategy.NewSelector(aliasConfig.Strategy, aliasConfig.Models)
-		return selector, nil
+	if len(aliasConfig.Models) == 0 {
+		return nil, errors.New("alias has no models configured")
 	}
 
-	return nil, errors.New("alias has no models configured")
+	cacheKey := GetAPIKey(c) + ":" + modelOrAlias
+
+	h.selectorMu.Lock()
+	defer h.selectorMu.Unlock()
+
+	if s, found := h.selectorCache.Get(cacheKey); found {
+		return s.(strategy.ModelSelector), nil
+	}
+
+	sel := strategy.NewSelector(aliasConfig.Strategy, aliasConfig.Models)
+	h.selectorCache.Set(cacheKey, sel, cache.DefaultExpiration)
+	return sel, nil
+}
+
+// copyResponseHeaders copies upstream response headers to the client.
+// Content-Length and Content-Encoding are stripped because the response body
+// may have been decompressed or converted, invalidating the original values.
+func copyResponseHeaders(c *gin.Context, upstream http.Header) {
+	for key, values := range upstream {
+		switch key {
+		case "Content-Length", "Content-Encoding":
+			continue
+		}
+		for _, value := range values {
+			c.Header(key, value)
+		}
+	}
+}
+
+type modelInfo struct {
+	ID      string `json:"id"`
+	Object  string `json:"object"`
+	OwnedBy string `json:"owned_by"`
+	Created int64  `json:"created"`
+}
+
+type listModelsResp struct {
+	Object string      `json:"object"`
+	Data   []modelInfo `json:"data"`
 }
 
 func findProvider(providerId string) (*config.ProviderConfig, error) {
@@ -263,10 +285,7 @@ func forwardRequest(ctx context.Context, httpClient *http.Client, provider *conf
 	}
 
 	for key, values := range header {
-		if key == "Content-Length" {
-			continue
-		}
-		if key == "Accept-Encoding" {
+		if key == "Content-Length" || key == "Accept-Encoding" {
 			continue
 		}
 		for _, value := range values {
@@ -297,15 +316,10 @@ func getHttpClient(isStream bool) *http.Client {
 	if isStream {
 		return sseHttpClient
 	}
-
 	return restHttpClient
 }
 
-func proxySse(c *gin.Context, resp *http.Response) {
-	proxySseReader(c, resp.Body)
-}
-
-func proxySseReader(c *gin.Context, reader io.Reader) {
+func proxySSE(c *gin.Context, reader io.Reader) {
 	ctx := c.Request.Context()
 
 	flusher, _ := c.Writer.(http.Flusher)

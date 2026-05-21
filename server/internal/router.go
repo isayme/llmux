@@ -8,6 +8,8 @@ import (
 )
 
 func SetupRouter(r *gin.Engine) {
+	proxyHandler := handler.NewProxyHandler()
+
 	r.GET("/version", VersionHandler)
 
 	{
@@ -33,12 +35,12 @@ func SetupRouter(r *gin.Engine) {
 		g.Use(handler.OpenaiErrorHandler())
 		g.Use(handler.APIKeyValidationMiddleware())
 
-		g.POST("/chat/completions", handler.ChatCompletionsHandler)
-		g.GET("/models", handler.ListModelsHandler)
+		g.POST("/chat/completions", proxyHandler.ChatCompletionsHandler)
+		g.GET("/models", proxyHandler.ListModelsHandler)
 
 		compatibleGroup := g.Group("/v1")
-		compatibleGroup.POST("/chat/completions", handler.ChatCompletionsHandler)
-		compatibleGroup.GET("/models", handler.ListModelsHandler)
+		compatibleGroup.POST("/chat/completions", proxyHandler.ChatCompletionsHandler)
+		compatibleGroup.GET("/models", proxyHandler.ListModelsHandler)
 	}
 
 	// anthropic
@@ -46,7 +48,7 @@ func SetupRouter(r *gin.Engine) {
 		g := r.Group("/anthropic")
 		g.Use(handler.AnthropicErrorHandler())
 		g.Use(handler.APIKeyValidationMiddleware())
-		g.POST("/v1/messages", handler.AnthropicMessagesHandler)
+		g.POST("/v1/messages", proxyHandler.AnthropicMessagesHandler)
 	}
 
 	// r.Static("/admin/", "./dist")
