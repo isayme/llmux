@@ -2,6 +2,7 @@ package internal
 
 import (
 	"llmux/internal/handler"
+	"llmux/internal/trace"
 	"net/http"
 
 	"github.com/gin-contrib/static"
@@ -39,6 +40,7 @@ func SetupRouter(r *gin.Engine) {
 
 		g.Use(handler.OpenaiErrorHandler())
 		g.Use(handler.APIKeyValidationMiddleware())
+		g.Use(trace.Middleware())
 
 		g.POST("/chat/completions", proxyHandler.ChatCompletionsHandler)
 		g.GET("/models", proxyHandler.ListModelsHandler)
@@ -49,6 +51,7 @@ func SetupRouter(r *gin.Engine) {
 		g := r.Group("/v1")
 		g.Use(handler.ResponsesErrorHandler())
 		g.Use(handler.APIKeyValidationMiddleware())
+		g.Use(trace.Middleware())
 
 		g.POST("/responses", proxyHandler.ResponsesHandler)
 	}
@@ -58,6 +61,7 @@ func SetupRouter(r *gin.Engine) {
 		g := r.Group("/anthropic")
 		g.Use(handler.AnthropicErrorHandler())
 		g.Use(handler.APIKeyValidationMiddleware())
+		g.Use(trace.Middleware())
 		g.POST("/v1/messages", proxyHandler.AnthropicMessagesHandler)
 	}
 
