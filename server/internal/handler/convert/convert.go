@@ -14,6 +14,19 @@ const (
 	ProtocolOpenAIResponses
 )
 
+func (p UsedAIProtocol) String() string {
+	switch p {
+	case ProtocolOpenAI:
+		return "openai"
+	case ProtocolAnthropic:
+		return "anthropic"
+	case ProtocolOpenAIResponses:
+		return "openai_responses"
+	default:
+		return "unknown"
+	}
+}
+
 // ProtocolConverter transforms requests and responses between AI protocols.
 // Each conversion direction (e.g. OpenAI ↔ Anthropic) is a separate
 // implementation; adding a new protocol only requires a new struct.

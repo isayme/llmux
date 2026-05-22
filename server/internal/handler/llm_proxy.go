@@ -9,6 +9,7 @@ import (
 	"llmux/internal/config"
 	"llmux/internal/handler/convert"
 	"llmux/internal/strategy"
+	"llmux/internal/trace"
 	"llmux/internal/util"
 	"net/http"
 	"strings"
@@ -17,6 +18,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/patrickmn/go-cache"
+	"go.opentelemetry.io/otel/attribute"
 )
 
 var restHttpClient = &http.Client{
@@ -86,17 +88,27 @@ func (h *ProxyHandler) handleProxy(c *gin.Context, usedProtocol convert.UsedAIPr
 		return
 	}
 
+	_, parseSpan := trace.StartSpan(c.Request.Context(), "parse request")
 	rawModel, err := getModel(req)
 	if err != nil {
+		trace.SetError(parseSpan, err)
+		parseSpan.End()
 		c.Error(BadRequest.WithMessage("get model failed", err))
 		return
 	}
+	trace.SetAttributes(parseSpan, attribute.String("model", rawModel))
+	parseSpan.End()
 
+	_, resolveSpan := trace.StartSpan(c.Request.Context(), "resolve alias")
 	selector, err := h.resolveModelSelector(c, rawModel)
 	if err != nil {
+		trace.SetError(resolveSpan, err)
+		resolveSpan.End()
 		c.Error(BadRequest.WithMessage("resolve alias failed", err))
 		return
 	}
+	trace.SetAttributes(resolveSpan, attribute.String("alias", rawModel))
+	resolveSpan.End()
 
 	isStream, err := isStream(req)
 	if err != nil {
@@ -105,7 +117,14 @@ func (h *ProxyHandler) handleProxy(c *gin.Context, usedProtocol convert.UsedAIPr
 	}
 
 	for {
+		_, selectSpan := trace.StartSpan(c.Request.Context(), "select provider")
 		providerId, model, canRetry := selector.Next()
+		trace.SetAttributes(selectSpan,
+			attribute.String("provider_id", providerId),
+			attribute.String("model_name", model),
+			attribute.Bool("retryable", canRetry),
+		)
+		selectSpan.End()
 		if providerId == "" {
 			c.Error(NotFound.WithMessage("no available model"))
 			return
@@ -129,7 +148,14 @@ func (h *ProxyHandler) handleProxy(c *gin.Context, usedProtocol convert.UsedAIPr
 
 		converter := convert.GetConverter(usedProtocol, provider.Type)
 
+		_, convertReqSpan := trace.StartSpan(c.Request.Context(), "convert request")
+		trace.SetAttributes(convertReqSpan,
+			attribute.String("converter", fmt.Sprintf("%T", converter)),
+			attribute.String("from_protocol", usedProtocol.String()),
+			attribute.String("to_provider_type", provider.Type),
+		)
 		forwardBody := converter.ConvertRequest(req)
+		convertReqSpan.End()
 
 		forwardPath := getProviderPath(provider.Type)
 
@@ -163,10 +189,12 @@ func (h *ProxyHandler) handleProxy(c *gin.Context, usedProtocol convert.UsedAIPr
 		defer resp.Body.Close()
 
 		if isStream {
+			_, sseSpan := trace.StartSpan(c.Request.Context(), "sse stream")
 			reader := converter.ConvertSSE(resp.Body)
 			copyResponseHeaders(c, resp.Header)
 			c.Status(resp.StatusCode)
 			proxySSE(c, reader)
+			sseSpan.End()
 			return
 		}
 
@@ -176,11 +204,15 @@ func (h *ProxyHandler) handleProxy(c *gin.Context, usedProtocol convert.UsedAIPr
 			return
 		}
 
+		_, convertRespSpan := trace.StartSpan(c.Request.Context(), "convert response")
 		respBody, err = converter.ConvertResponse(respBody)
 		if err != nil {
+			trace.SetError(convertRespSpan, err)
+			convertRespSpan.End()
 			c.Error(InternalServerError.WithMessage("convert response body failed", err))
 			return
 		}
+		convertRespSpan.End()
 
 		copyResponseHeaders(c, resp.Header)
 		c.Status(resp.StatusCode)
