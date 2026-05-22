@@ -18,15 +18,18 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/patrickmn/go-cache"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/otel/attribute"
 )
 
 var restHttpClient = &http.Client{
-	Timeout: 60 * time.Second,
+	Transport: otelhttp.NewTransport(http.DefaultTransport),
+	Timeout:   60 * time.Second,
 }
 
 var sseHttpClient = &http.Client{
-	Timeout: 0,
+	Transport: otelhttp.NewTransport(http.DefaultTransport),
+	Timeout:   0,
 }
 
 var anthropicVersion = "2023-06-01"
@@ -312,6 +315,12 @@ func getProviderPath(providerType string) string {
 }
 
 func forwardRequest(ctx context.Context, httpClient *http.Client, provider *config.ProviderConfig, method, path string, header http.Header, body map[string]interface{}) (*http.Response, error) {
+	ctx, upstreamSpan := trace.StartSpan(ctx, "upstream call",
+		attribute.String("provider", provider.ID),
+		attribute.String("provider_type", provider.Type),
+	)
+	defer upstreamSpan.End()
+
 	url := strings.TrimSuffix(provider.BaseURL, "/") + path
 
 	var bodyReader io.Reader
@@ -321,6 +330,7 @@ func forwardRequest(ctx context.Context, httpClient *http.Client, provider *conf
 	}
 	req, err := http.NewRequestWithContext(ctx, method, url, bodyReader)
 	if err != nil {
+		trace.SetError(upstreamSpan, err)
 		return nil, err
 	}
 
@@ -341,7 +351,14 @@ func forwardRequest(ctx context.Context, httpClient *http.Client, provider *conf
 		}
 	}
 
-	return httpClient.Do(req)
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		trace.SetError(upstreamSpan, err)
+		return nil, err
+	}
+
+	upstreamSpan.SetAttributes(attribute.Int("http.status_code", resp.StatusCode))
+	return resp, nil
 }
 
 func getModel(reqBody map[string]interface{}) (string, error) {
