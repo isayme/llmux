@@ -114,7 +114,7 @@ export function AliasesPage() {
                         <div className="flex flex-col gap-1">
                           {alias.models.map((item, idx) => (
                             <span key={idx} className="font-mono text-sm">
-                              Provider: {item.provider}, Model: {item.model}
+                              provider: {item.provider}, model: {item.model}
                             </span>
                           ))}
                         </div>
