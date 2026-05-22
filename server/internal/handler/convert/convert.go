@@ -11,6 +11,7 @@ type UsedAIProtocol int
 const (
 	ProtocolOpenAI UsedAIProtocol = iota
 	ProtocolAnthropic
+	ProtocolOpenAIResponses
 )
 
 // ProtocolConverter transforms requests and responses between AI protocols.
@@ -25,13 +26,22 @@ type ProtocolConverter interface {
 // GetConverter returns the ProtocolConverter for the given client protocol and
 // provider type. Returns a no-op passthrough converter when protocols match.
 func GetConverter(usedProtocol UsedAIProtocol, providerType string) ProtocolConverter {
-	if usedProtocol == ProtocolOpenAI && providerType == constant.ProviderTypeAnthropic {
+	switch {
+	case usedProtocol == ProtocolOpenAI && providerType == constant.ProviderTypeAnthropic:
 		return &openaiToAnthropicConverter{}
-	}
-	if usedProtocol == ProtocolAnthropic && providerType == constant.ProviderTypeOpenAI {
+	case usedProtocol == ProtocolAnthropic && providerType == constant.ProviderTypeOpenAI:
 		return &anthropicToOpenAIConverter{}
+	case usedProtocol == ProtocolOpenAIResponses && providerType == constant.ProviderTypeOpenAI:
+		return &responsesToOpenAIConverter{}
+	case usedProtocol == ProtocolOpenAI && providerType == constant.ProviderTypeOpenAIResponses:
+		return &openaiToResponsesConverter{}
+	case usedProtocol == ProtocolOpenAIResponses && providerType == constant.ProviderTypeAnthropic:
+		return &responsesToAnthropicConverter{}
+	case usedProtocol == ProtocolAnthropic && providerType == constant.ProviderTypeOpenAIResponses:
+		return &anthropicToResponsesConverter{}
+	default:
+		return &noopConverter{}
 	}
-	return &noopConverter{}
 }
 
 // noopConverter passes data through unchanged when no protocol conversion
@@ -76,4 +86,16 @@ func extractString(m map[string]interface{}, keys ...string) string {
 		}
 	}
 	return ""
+}
+
+func toFloat64(v interface{}) float64 {
+	switch n := v.(type) {
+	case float64:
+		return n
+	case int:
+		return float64(n)
+	case int64:
+		return float64(n)
+	}
+	return 0
 }

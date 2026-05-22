@@ -2,6 +2,7 @@ package constant
 
 // ProviderType constants
 const (
-	ProviderTypeOpenAI    = "openai"
-	ProviderTypeAnthropic = "anthropic"
+	ProviderTypeOpenAI          = "openai"
+	ProviderTypeAnthropic       = "anthropic"
+	ProviderTypeOpenAIResponses = "openai_responses"
 )
