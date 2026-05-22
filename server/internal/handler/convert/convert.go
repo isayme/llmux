@@ -23,25 +23,27 @@ type ProtocolConverter interface {
 	ConvertSSE(body io.ReadCloser) io.ReadCloser
 }
 
+type converterKey struct {
+	src UsedAIProtocol
+	dst string
+}
+
+var converters = map[converterKey]func() ProtocolConverter{
+	{ProtocolOpenAI, constant.ProviderTypeAnthropic}:                func() ProtocolConverter { return &openaiToAnthropicConverter{} },
+	{ProtocolAnthropic, constant.ProviderTypeOpenAI}:                func() ProtocolConverter { return &anthropicToOpenAIConverter{} },
+	{ProtocolOpenAIResponses, constant.ProviderTypeOpenAI}:          func() ProtocolConverter { return &responsesToOpenAIConverter{} },
+	{ProtocolOpenAI, constant.ProviderTypeOpenAIResponses}:          func() ProtocolConverter { return &openaiToResponsesConverter{} },
+	{ProtocolOpenAIResponses, constant.ProviderTypeAnthropic}:       func() ProtocolConverter { return &responsesToAnthropicConverter{} },
+	{ProtocolAnthropic, constant.ProviderTypeOpenAIResponses}:       func() ProtocolConverter { return &anthropicToResponsesConverter{} },
+}
+
 // GetConverter returns the ProtocolConverter for the given client protocol and
 // provider type. Returns a no-op passthrough converter when protocols match.
 func GetConverter(usedProtocol UsedAIProtocol, providerType string) ProtocolConverter {
-	switch {
-	case usedProtocol == ProtocolOpenAI && providerType == constant.ProviderTypeAnthropic:
-		return &openaiToAnthropicConverter{}
-	case usedProtocol == ProtocolAnthropic && providerType == constant.ProviderTypeOpenAI:
-		return &anthropicToOpenAIConverter{}
-	case usedProtocol == ProtocolOpenAIResponses && providerType == constant.ProviderTypeOpenAI:
-		return &responsesToOpenAIConverter{}
-	case usedProtocol == ProtocolOpenAI && providerType == constant.ProviderTypeOpenAIResponses:
-		return &openaiToResponsesConverter{}
-	case usedProtocol == ProtocolOpenAIResponses && providerType == constant.ProviderTypeAnthropic:
-		return &responsesToAnthropicConverter{}
-	case usedProtocol == ProtocolAnthropic && providerType == constant.ProviderTypeOpenAIResponses:
-		return &anthropicToResponsesConverter{}
-	default:
-		return &noopConverter{}
+	if fn, ok := converters[converterKey{usedProtocol, providerType}]; ok {
+		return fn()
 	}
+	return &noopConverter{}
 }
 
 // noopConverter passes data through unchanged when no protocol conversion
