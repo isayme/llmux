@@ -1,0 +1,39 @@
+server:
+  port: 8080
+  master_key: ""
+  session:
+    secret_key: ""
+    cookie_name: llmux_sid
+    max_age: 86400
+
+providers:
+  # example:
+  #   name: "Example Provider"
+  #   api_key: ""
+  #   base_url: "https://api.example.com/v1"
+  #   type: openai
+  #   enabled: true
+
+aliases:
+  # example:
+  #   name: "Example Alias"
+  #   strategy: round_robin
+  #   models:
+  #     - provider: example
+  #       model: gpt-4o
+  #       weight: 1
+  #   enabled: true
+
+api_keys:
+  # - name: "example-key"
+  #   key: ""
+  #   enabled: true
+
+trace:
+  enabled: false
+  exporter: stdout
+  endpoint: ""
+  sampling:
+    ratio: 1.0
+    force_on_error: true
+    force_on_latency: 5s
