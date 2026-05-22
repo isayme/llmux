@@ -44,6 +44,15 @@ func SetupRouter(r *gin.Engine) {
 		g.GET("/models", proxyHandler.ListModelsHandler)
 	}
 
+	// openai responses
+	{
+		g := r.Group("/v1")
+		g.Use(handler.ResponsesErrorHandler())
+		g.Use(handler.APIKeyValidationMiddleware())
+
+		g.POST("/responses", proxyHandler.ResponsesHandler)
+	}
+
 	// anthropic
 	{
 		g := r.Group("/anthropic")

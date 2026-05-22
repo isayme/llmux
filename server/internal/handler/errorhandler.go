@@ -92,3 +92,32 @@ func AnthropicErrorHandler() gin.HandlerFunc {
 		}
 	}
 }
+
+func ResponsesErrorHandler() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.Next()
+
+		if len(c.Errors) > 0 {
+			err := c.Errors.Last().Err
+
+			status := http.StatusInternalServerError
+			code := "api_error"
+			message := err.Error()
+
+			var httpError HttpError
+			if errors.As(err, &httpError) {
+				status = httpError.StatusCode
+				code = httpError.Code
+				message = httpError.Message
+			}
+
+			c.JSON(status, gin.H{
+				"type": "error",
+				"error": gin.H{
+					"code":    code,
+					"message": message,
+				},
+			})
+		}
+	}
+}

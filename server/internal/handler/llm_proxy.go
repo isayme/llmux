@@ -52,6 +52,10 @@ func (h *ProxyHandler) AnthropicMessagesHandler(c *gin.Context) {
 	h.handleProxy(c, convert.ProtocolAnthropic)
 }
 
+func (h *ProxyHandler) ResponsesHandler(c *gin.Context) {
+	h.handleProxy(c, convert.ProtocolOpenAIResponses)
+}
+
 func (h *ProxyHandler) ListModelsHandler(c *gin.Context) {
 	modelInfos := make([]modelInfo, 0, len(config.Get().Aliases))
 
@@ -265,10 +269,14 @@ func findProvider(providerId string) (*config.ProviderConfig, error) {
 }
 
 func getProviderPath(providerType string) string {
-	if providerType == "anthropic" {
+	switch providerType {
+	case "anthropic":
 		return "/v1/messages"
+	case "openai_responses":
+		return "/v1/responses"
+	default:
+		return "/chat/completions"
 	}
-	return "/chat/completions"
 }
 
 func forwardRequest(ctx context.Context, httpClient *http.Client, provider *config.ProviderConfig, method, path string, header http.Header, body map[string]interface{}) (*http.Response, error) {
