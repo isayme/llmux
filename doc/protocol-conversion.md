@@ -403,7 +403,7 @@ data: {"choices":[{"finish_reason":     event: content_block_stop
                                         event: message_stop
                                         data: {type:"message_stop"}
 
-data: [DONE]                            event: message_stop (如果还未发送)
+data: [DONE]                            event: message_stop
                                         data: {type:"message_stop"}
 ```
 
@@ -413,7 +413,7 @@ data: [DONE]                            event: message_stop (如果还未发送)
 - 每条有 `delta.content` 的 chunk 发送 `content_block_delta`
 - 遇到非空 `finish_reason` 时连续发送 `content_block_stop` → `message_delta` → `message_stop`
 - `finish_reason` 映射：`stop` → `end_turn`，`length` → `max_tokens`
-- `data: [DONE]` 如果 message_stop 还没发送，补发一次
+- `data: [DONE]` 发送 `message_stop` 后结束流（不论前面 finish_reason 是否已经发送过 message_stop）
 - `message_id` 和 `model` 从第一个 chunk 提取后缓存
 
 #### 样例：OpenAI SSE 输入
@@ -842,8 +842,13 @@ data: {"choices":[{"delta":                event: response.text.delta
   {"content":" world"}}]}                  data: {delta: " world"}
 
 data: {"choices":[{"delta":{},             event: response.text.done
-  "finish_reason":"stop"}]}                data: {text: ""}
+  "finish_reason":"stop"}]}                data: {text: ""}        (if hadContent)
                                            event: response.output_item.done
+                                           event: response.done
+                                           data: {response: {id, model}}
+
+data: [DONE]                               event: response.text.done      (if hadContent)
+                                           event: response.output_item.done (if hadContent)
                                            event: response.done
                                            data: {response: {id, model}}
 ```
@@ -851,12 +856,12 @@ data: {"choices":[{"delta":{},             event: response.text.done
 #### 关键规则
 
 - 第一条有效 chunk（含 `choices[0].delta`）触发连续三个事件：`response.created` → `response.output_item.added` → `response.content_part.added`
-- `response_id` 和 `model` 从第一个 chunk 提取后缓存
+- `response_id` 和 `model` 从第一个 chunk 提取后缓存，后续事件中的 response.done 复用缓存值
 - 每条有非空 `delta.content` 的 chunk 发送 `response.text.delta`，同时标记 `hadContent = true`
-- 遇到非空 `finish_reason` 时：如果曾发送过内容则先发 `response.text.done`，然后发 `response.output_item.done`，最后发 `response.done`
-- `data: [DONE]`：如果曾发送过内容，补发 `response.text.done` + `response.output_item.done`，最后发 `response.done`（含 response id 和 model）
+- 遇到非空 `finish_reason` 时：若 `hadContent` 为 true 则先发 `response.text.done`；然后无条件发送 `response.output_item.done` 和 `response.done`（含缓存的 id 和 model）
+- `data: [DONE]`：无条件发送 `response.done`（含缓存的 id 和 model）；若 `hadContent` 为 true 则额外在之前发送 `response.text.done` + `response.output_item.done`
 - 空 data、choices 为空、choices[0] 不是 map 的 chunk 被静默跳过
-- `finish_reason` 不参与映射，Responses API 的结束语义由事件序列表达
+- `finish_reason` 的值不参与映射（不转换为 stop_reason），Responses API 的结束语义由事件序列表达
 
 #### 样例：Chat SSE 输入
 
@@ -889,6 +894,15 @@ data: {"type":"response.text.delta","delta":"Hello"}
 
 event: response.text.delta
 data: {"type":"response.text.delta","delta":" world"}
+
+event: response.text.done
+data: {"type":"response.text.done","text":""}
+
+event: response.output_item.done
+data: {"type":"response.output_item.done"}
+
+event: response.done
+data: {"type":"response.done","response":{"id":"chatcmpl-123","model":"gpt-4o"}}
 
 event: response.text.done
 data: {"type":"response.text.done","text":""}
