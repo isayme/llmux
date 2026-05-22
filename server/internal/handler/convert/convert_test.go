@@ -955,3 +955,686 @@ func TestRoundTrip_ResponseJSON(t *testing.T) {
 		t.Error("expected Hi content")
 	}
 }
+
+// ============================================================
+// GetConverter — new protocol combinations
+// ============================================================
+
+func TestGetConverterResponsesToOpenAI(t *testing.T) {
+	c := GetConverter(ProtocolOpenAIResponses, "openai")
+	if _, ok := c.(*responsesToOpenAIConverter); !ok {
+		t.Errorf("expected responsesToOpenAIConverter, got %T", c)
+	}
+}
+
+func TestGetConverterOpenAIToResponses(t *testing.T) {
+	c := GetConverter(ProtocolOpenAI, "openai_responses")
+	if _, ok := c.(*openaiToResponsesConverter); !ok {
+		t.Errorf("expected openaiToResponsesConverter, got %T", c)
+	}
+}
+
+func TestGetConverterResponsesToAnthropic(t *testing.T) {
+	c := GetConverter(ProtocolOpenAIResponses, "anthropic")
+	if _, ok := c.(*responsesToAnthropicConverter); !ok {
+		t.Errorf("expected responsesToAnthropicConverter, got %T", c)
+	}
+}
+
+func TestGetConverterAnthropicToResponses(t *testing.T) {
+	c := GetConverter(ProtocolAnthropic, "openai_responses")
+	if _, ok := c.(*anthropicToResponsesConverter); !ok {
+		t.Errorf("expected anthropicToResponsesConverter, got %T", c)
+	}
+}
+
+func TestGetConverterResponsesSameProtocol(t *testing.T) {
+	c := GetConverter(ProtocolOpenAIResponses, "openai_responses")
+	if _, ok := c.(*noopConverter); !ok {
+		t.Errorf("expected noopConverter, got %T", c)
+	}
+}
+
+// ============================================================
+// responsesToOpenAIConverter — ConvertRequest
+// ============================================================
+
+func TestResponsesToOpenAI_StringInput(t *testing.T) {
+	c := &responsesToOpenAIConverter{}
+	req := map[string]interface{}{
+		"model":         "gpt-4o",
+		"input":         "Hello!",
+		"instructions":  "You are helpful.",
+		"max_output_tokens": 100,
+	}
+	out := c.ConvertRequest(req)
+
+	messages, ok := out["messages"].([]interface{})
+	if !ok {
+		t.Fatal("expected messages array")
+	}
+	if len(messages) != 2 {
+		t.Fatalf("expected 2 messages, got %d", len(messages))
+	}
+	sysMsg, _ := messages[0].(map[string]interface{})
+	if sysMsg["role"] != "system" || sysMsg["content"] != "You are helpful." {
+		t.Errorf("unexpected system message: %v", sysMsg)
+	}
+	userMsg, _ := messages[1].(map[string]interface{})
+	if userMsg["role"] != "user" || userMsg["content"] != "Hello!" {
+		t.Errorf("unexpected user message: %v", userMsg)
+	}
+	if v, ok := out["max_tokens"]; !ok || toFloat64(v) != 100 {
+		t.Errorf("expected max_tokens=100, got %v", out["max_tokens"])
+	}
+	if out["model"] != "gpt-4o" {
+		t.Error("expected model passthrough")
+	}
+	if _, ok := out["max_output_tokens"]; ok {
+		t.Error("expected max_output_tokens removed")
+	}
+	if _, ok := out["instructions"]; ok {
+		t.Error("expected instructions removed")
+	}
+}
+
+func TestResponsesToOpenAI_InputArray(t *testing.T) {
+	c := &responsesToOpenAIConverter{}
+	req := map[string]interface{}{
+		"input": []interface{}{
+			map[string]interface{}{"type": "message", "role": "user", "content": "Hi"},
+			map[string]interface{}{"type": "message", "role": "assistant", "content": "Hello!"},
+		},
+	}
+	out := c.ConvertRequest(req)
+	messages, _ := out["messages"].([]interface{})
+	if len(messages) != 2 {
+		t.Fatalf("expected 2 messages, got %d", len(messages))
+	}
+}
+
+func TestResponsesToOpenAI_NoInstructions(t *testing.T) {
+	c := &responsesToOpenAIConverter{}
+	req := map[string]interface{}{
+		"input": "Hi",
+	}
+	out := c.ConvertRequest(req)
+	messages, _ := out["messages"].([]interface{})
+	if len(messages) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(messages))
+	}
+	msg, _ := messages[0].(map[string]interface{})
+	if msg["role"] != "user" {
+		t.Error("expected user role")
+	}
+}
+
+// ============================================================
+// responsesToOpenAIConverter — ConvertResponse
+// ============================================================
+
+func TestResponsesToOpenAI_ConvertResponse(t *testing.T) {
+	c := &responsesToOpenAIConverter{}
+	body := []byte(`{
+		"id": "resp_abc",
+		"object": "response",
+		"created_at": 1734567890,
+		"model": "gpt-4o",
+		"output": [{
+			"type": "message",
+			"id": "msg_1",
+			"role": "assistant",
+			"content": [{"type": "output_text", "text": "Hello world"}]
+		}],
+		"usage": {"input_tokens": 10, "output_tokens": 5, "total_tokens": 15}
+	}`)
+	out, err := c.ConvertResponse(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var o map[string]interface{}
+	json.Unmarshal(out, &o)
+
+	if o["object"] != "chat.completion" {
+		t.Error("expected object=chat.completion")
+	}
+	if _, ok := o["output"]; ok {
+		t.Error("expected output to be removed")
+	}
+	if created, ok := o["created"]; !ok || created != float64(1734567890) {
+		t.Errorf("expected created=1734567890, got %v", o["created"])
+	}
+	choices := o["choices"].([]interface{})
+	choice := choices[0].(map[string]interface{})
+	msg := choice["message"].(map[string]interface{})
+	if msg["content"] != "Hello world" {
+		t.Errorf("expected Hello world, got %v", msg["content"])
+	}
+	if msg["role"] != "assistant" {
+		t.Errorf("expected assistant, got %v", msg["role"])
+	}
+	if choice["finish_reason"] != "stop" {
+		t.Errorf("expected stop, got %v", choice["finish_reason"])
+	}
+	usage := o["usage"].(map[string]interface{})
+	if usage["prompt_tokens"].(float64) != 10 {
+		t.Error("prompt_tokens mismatch")
+	}
+	if usage["completion_tokens"].(float64) != 5 {
+		t.Error("completion_tokens mismatch")
+	}
+	if usage["total_tokens"].(float64) != 15 {
+		t.Error("total_tokens mismatch")
+	}
+}
+
+func TestResponsesToOpenAI_ConvertResponse_EmptyOutput(t *testing.T) {
+	c := &responsesToOpenAIConverter{}
+	body := []byte(`{"id":"r1","object":"response","output":[]}`)
+	out, err := c.ConvertResponse(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var o map[string]interface{}
+	json.Unmarshal(out, &o)
+	choices := o["choices"].([]interface{})
+	msg := choices[0].(map[string]interface{})["message"].(map[string]interface{})
+	if msg["content"] != "" {
+		t.Error("expected empty content")
+	}
+}
+
+// ============================================================
+// openaiToResponsesConverter — ConvertRequest
+// ============================================================
+
+func TestOpenAIToResponses_ConvertRequest(t *testing.T) {
+	c := &openaiToResponsesConverter{}
+	req := map[string]interface{}{
+		"model": "gpt-4o",
+		"messages": []interface{}{
+			map[string]interface{}{"role": "system", "content": "Be helpful."},
+			map[string]interface{}{"role": "user", "content": "Hi!"},
+		},
+		"max_tokens": 100,
+	}
+	out := c.ConvertRequest(req)
+
+	if out["instructions"] != "Be helpful." {
+		t.Errorf("expected instructions='Be helpful.', got %v", out["instructions"])
+	}
+	input, _ := out["input"].([]interface{})
+	if len(input) != 1 {
+		t.Fatalf("expected 1 input item, got %d", len(input))
+	}
+	first, _ := input[0].(map[string]interface{})
+	if first["role"] != "user" {
+		t.Error("expected user role")
+	}
+	if v, ok := out["max_output_tokens"]; !ok || toFloat64(v) != 100 {
+		t.Errorf("expected max_output_tokens=100, got %v", out["max_output_tokens"])
+	}
+	if _, ok := out["max_tokens"]; ok {
+		t.Error("expected max_tokens removed")
+	}
+}
+
+func TestOpenAIToResponses_ConvertRequest_NoSystem(t *testing.T) {
+	c := &openaiToResponsesConverter{}
+	req := map[string]interface{}{
+		"messages": []interface{}{
+			map[string]interface{}{"role": "user", "content": "Hi"},
+		},
+	}
+	out := c.ConvertRequest(req)
+	if _, ok := out["instructions"]; ok {
+		t.Error("expected no instructions")
+	}
+	input, _ := out["input"].([]interface{})
+	if len(input) != 1 {
+		t.Fatalf("expected 1 input, got %d", len(input))
+	}
+}
+
+// ============================================================
+// openaiToResponsesConverter — ConvertResponse
+// ============================================================
+
+func TestOpenAIToResponses_ConvertResponse(t *testing.T) {
+	c := &openaiToResponsesConverter{}
+	body := []byte(`{
+		"id": "chatcmpl-123",
+		"object": "chat.completion",
+		"created": 1734567890,
+		"model": "gpt-4o",
+		"choices": [{
+			"index": 0,
+			"message": {"role": "assistant", "content": "Hello!"},
+			"finish_reason": "stop"
+		}],
+		"usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}
+	}`)
+	out, err := c.ConvertResponse(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var o map[string]interface{}
+	json.Unmarshal(out, &o)
+
+	if o["object"] != "response" {
+		t.Errorf("expected object=response, got %v", o["object"])
+	}
+	if created, ok := o["created_at"]; !ok || created != float64(1734567890) {
+		t.Errorf("expected created_at=1734567890, got %v", o["created_at"])
+	}
+	output, _ := o["output"].([]interface{})
+	if len(output) != 1 {
+		t.Fatalf("expected 1 output item, got %d", len(output))
+	}
+	first, _ := output[0].(map[string]interface{})
+	content, _ := first["content"].([]interface{})
+	firstContent, _ := content[0].(map[string]interface{})
+	if firstContent["text"] != "Hello!" {
+		t.Errorf("expected text='Hello!', got %v", firstContent["text"])
+	}
+	usage := o["usage"].(map[string]interface{})
+	if usage["input_tokens"].(float64) != 10 {
+		t.Error("input_tokens mismatch")
+	}
+	if usage["output_tokens"].(float64) != 5 {
+		t.Error("output_tokens mismatch")
+	}
+}
+
+// ============================================================
+// responsesToAnthropicConverter — ConvertRequest
+// ============================================================
+
+func TestResponsesToAnthropic_ConvertRequest(t *testing.T) {
+	c := &responsesToAnthropicConverter{}
+	req := map[string]interface{}{
+		"model":         "gpt-4o",
+		"input":         "Hello!",
+		"instructions":  "You are helpful.",
+		"max_output_tokens": 100,
+	}
+	out := c.ConvertRequest(req)
+
+	if out["system"] != "You are helpful." {
+		t.Errorf("expected system='You are helpful.', got %v", out["system"])
+	}
+	messages, _ := out["messages"].([]interface{})
+	if len(messages) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(messages))
+	}
+	msg, _ := messages[0].(map[string]interface{})
+	if msg["role"] != "user" || msg["content"] != "Hello!" {
+		t.Errorf("unexpected message: %v", msg)
+	}
+	if v, ok := out["max_tokens"]; !ok || toFloat64(v) != 100 {
+		t.Errorf("expected max_tokens=100, got %v", out["max_tokens"])
+	}
+}
+
+// ============================================================
+// responsesToAnthropicConverter — ConvertResponse
+// ============================================================
+
+func TestResponsesToAnthropic_ConvertResponse(t *testing.T) {
+	c := &responsesToAnthropicConverter{}
+	body := []byte(`{
+		"id": "resp_abc",
+		"object": "response",
+		"model": "gpt-4o",
+		"output": [{
+			"type": "message",
+			"role": "assistant",
+			"content": [{"type": "output_text", "text": "Hello!"}]
+		}],
+		"usage": {"input_tokens": 10, "output_tokens": 5}
+	}`)
+	out, err := c.ConvertResponse(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var a map[string]interface{}
+	json.Unmarshal(out, &a)
+
+	if a["type"] != "message" {
+		t.Errorf("expected type=message, got %v", a["type"])
+	}
+	if a["role"] != "assistant" {
+		t.Error("expected role=assistant")
+	}
+	content, _ := a["content"].([]interface{})
+	block, _ := content[0].(map[string]interface{})
+	if block["text"] != "Hello!" {
+		t.Errorf("expected text='Hello!', got %v", block["text"])
+	}
+	usage := a["usage"].(map[string]interface{})
+	if usage["input_tokens"].(float64) != 10 {
+		t.Error("input_tokens mismatch")
+	}
+	if usage["output_tokens"].(float64) != 5 {
+		t.Error("output_tokens mismatch")
+	}
+}
+
+// ============================================================
+// anthropicToResponsesConverter — ConvertRequest
+// ============================================================
+
+func TestAnthropicToResponses_ConvertRequest(t *testing.T) {
+	c := &anthropicToResponsesConverter{}
+	req := map[string]interface{}{
+		"model":  "claude-3",
+		"messages": []interface{}{
+			map[string]interface{}{"role": "user", "content": "Hi!"},
+		},
+		"system":     "Be helpful.",
+		"max_tokens": 100,
+	}
+	out := c.ConvertRequest(req)
+
+	if out["instructions"] != "Be helpful." {
+		t.Errorf("expected instructions='Be helpful.', got %v", out["instructions"])
+	}
+	input, _ := out["input"].([]interface{})
+	if len(input) != 1 {
+		t.Fatalf("expected 1 input, got %d", len(input))
+	}
+	first, _ := input[0].(map[string]interface{})
+	if first["role"] != "user" {
+		t.Error("expected user role")
+	}
+	if v, ok := out["max_output_tokens"]; !ok || toFloat64(v) != 100 {
+		t.Errorf("expected max_output_tokens=100, got %v", out["max_output_tokens"])
+	}
+	if _, ok := out["system"]; ok {
+		t.Error("expected system removed")
+	}
+	if _, ok := out["messages"]; ok {
+		t.Error("expected messages removed")
+	}
+}
+
+func TestAnthropicToResponses_ConvertRequest_SystemContentBlocks(t *testing.T) {
+	c := &anthropicToResponsesConverter{}
+	req := map[string]interface{}{
+		"system": []interface{}{
+			map[string]interface{}{"type": "text", "text": "Rule one."},
+			map[string]interface{}{"type": "text", "text": "Rule two."},
+		},
+	}
+	out := c.ConvertRequest(req)
+	if out["instructions"] != "Rule one.\n\nRule two." {
+		t.Errorf("expected joined instructions, got %v", out["instructions"])
+	}
+}
+
+func TestAnthropicToResponses_ConvertRequest_NoSystem(t *testing.T) {
+	c := &anthropicToResponsesConverter{}
+	req := map[string]interface{}{
+		"messages": []interface{}{
+			map[string]interface{}{"role": "user", "content": "Hi"},
+		},
+	}
+	out := c.ConvertRequest(req)
+	if _, ok := out["instructions"]; ok {
+		t.Error("expected no instructions")
+	}
+}
+
+// ============================================================
+// anthropicToResponsesConverter — ConvertResponse
+// ============================================================
+
+func TestAnthropicToResponses_ConvertResponse(t *testing.T) {
+	c := &anthropicToResponsesConverter{}
+	body := []byte(`{
+		"id": "msg_abc",
+		"type": "message",
+		"role": "assistant",
+		"model": "claude-3",
+		"content": [{"type": "text", "text": "Hello!"}],
+		"usage": {"input_tokens": 10, "output_tokens": 5}
+	}`)
+	out, err := c.ConvertResponse(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var o map[string]interface{}
+	json.Unmarshal(out, &o)
+
+	if o["object"] != "response" {
+		t.Errorf("expected object=response, got %v", o["object"])
+	}
+	if _, ok := o["type"]; ok {
+		t.Error("expected type removed")
+	}
+	output, _ := o["output"].([]interface{})
+	if len(output) != 1 {
+		t.Fatalf("expected 1 output, got %d", len(output))
+	}
+	first, _ := output[0].(map[string]interface{})
+	content, _ := first["content"].([]interface{})
+	firstContent, _ := content[0].(map[string]interface{})
+	if firstContent["text"] != "Hello!" {
+		t.Errorf("expected text='Hello!', got %v", firstContent["text"])
+	}
+}
+
+// ============================================================
+// SSE: Responses SSE → OpenAI SSE
+// ============================================================
+
+func TestConvertSSE_ResponsesToOpenAI(t *testing.T) {
+	c := &responsesToOpenAIConverter{}
+	input := "event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_1\",\"model\":\"gpt-4o\"}}\n\n" +
+		"event: response.text.delta\ndata: {\"type\":\"response.text.delta\",\"delta\":\"Hello\"}\n\n" +
+		"event: response.done\ndata: {\"type\":\"response.done\",\"response\":{\"id\":\"resp_1\",\"model\":\"gpt-4o\",\"usage\":{\"input_tokens\":10,\"output_tokens\":5}}}\n\n"
+
+	reader := c.ConvertSSE(io.NopCloser(strings.NewReader(input)))
+	result, _ := io.ReadAll(reader)
+	resultStr := string(result)
+
+	if !strings.Contains(resultStr, `"role":"assistant"`) {
+		t.Error("expected role assistant in output")
+	}
+	if !strings.Contains(resultStr, `"content":"Hello"`) {
+		t.Error("expected content Hello in output")
+	}
+	if !strings.Contains(resultStr, `"finish_reason":"stop"`) {
+		t.Error("expected finish_reason stop in output")
+	}
+	if !strings.Contains(resultStr, "[DONE]") {
+		t.Error("expected [DONE] in output")
+	}
+	if !strings.Contains(resultStr, `"prompt_tokens":10`) {
+		t.Error("expected prompt_tokens=10 in output")
+	}
+}
+
+// ============================================================
+// SSE: OpenAI SSE → Responses SSE
+// ============================================================
+
+func TestConvertSSE_OpenAIToResponses(t *testing.T) {
+	c := &openaiToResponsesConverter{}
+	input := `data: {"id":"chat-1","model":"gpt-4o","choices":[{"delta":{"role":"assistant"}}]}` + "\n\n" +
+		`data: {"choices":[{"delta":{"content":"Hi"}}]}` + "\n\n" +
+		`data: {"choices":[{"delta":{},"finish_reason":"stop"}]}` + "\n\n" +
+		`data: [DONE]` + "\n\n"
+
+	reader := c.ConvertSSE(io.NopCloser(strings.NewReader(input)))
+	result, _ := io.ReadAll(reader)
+	resultStr := string(result)
+
+	if !strings.Contains(resultStr, "response.created") {
+		t.Error("expected response.created event")
+	}
+	if !strings.Contains(resultStr, "response.output_item.added") {
+		t.Error("expected response.output_item.added event")
+	}
+	if !strings.Contains(resultStr, "response.content_part.added") {
+		t.Error("expected response.content_part.added event")
+	}
+	if !strings.Contains(resultStr, "response.text.delta") {
+		t.Error("expected response.text.delta event")
+	}
+	if !strings.Contains(resultStr, `"delta":"Hi"`) {
+		t.Error("expected delta Hi")
+	}
+	if !strings.Contains(resultStr, "response.done") {
+		t.Error("expected response.done event")
+	}
+}
+
+// ============================================================
+// SSE: Responses SSE → Anthropic SSE
+// ============================================================
+
+func TestConvertSSE_ResponsesToAnthropic(t *testing.T) {
+	c := &responsesToAnthropicConverter{}
+	input := "event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_1\"}}\n\n" +
+		"event: response.text.delta\ndata: {\"type\":\"response.text.delta\",\"delta\":\"Hello\"}\n\n" +
+		"event: response.done\ndata: {\"type\":\"response.done\"}\n\n"
+
+	reader := c.ConvertSSE(io.NopCloser(strings.NewReader(input)))
+	result, _ := io.ReadAll(reader)
+	resultStr := string(result)
+
+	if !strings.Contains(resultStr, AnthropicSSEMessageStartEvent) {
+		t.Error("expected message_start event")
+	}
+	if !strings.Contains(resultStr, AnthropicSSEContentBlockStartEvent) {
+		t.Error("expected content_block_start event")
+	}
+	if !strings.Contains(resultStr, `"type":"text_delta"`) {
+		t.Error("expected text_delta type")
+	}
+	if !strings.Contains(resultStr, `"text":"Hello"`) {
+		t.Error("expected text Hello")
+	}
+	if !strings.Contains(resultStr, AnthropicSSEContentBlockStopEvent) {
+		t.Error("expected content_block_stop event")
+	}
+	if !strings.Contains(resultStr, AnthropicSSEMessageDeltaEvent) {
+		t.Error("expected message_delta event")
+	}
+	if !strings.Contains(resultStr, AnthropicSSEMessageStopEvent) {
+		t.Error("expected message_stop event")
+	}
+}
+
+// ============================================================
+// SSE: Anthropic SSE → Responses SSE
+// ============================================================
+
+func TestConvertSSE_AnthropicToResponses(t *testing.T) {
+	c := &anthropicToResponsesConverter{}
+	input := "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\"}}\n\n" +
+		"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"Hi\"}}\n\n" +
+		"event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"
+
+	reader := c.ConvertSSE(io.NopCloser(strings.NewReader(input)))
+	result, _ := io.ReadAll(reader)
+	resultStr := string(result)
+
+	if !strings.Contains(resultStr, "response.created") {
+		t.Error("expected response.created event")
+	}
+	if !strings.Contains(resultStr, "response.output_item.added") {
+		t.Error("expected response.output_item.added")
+	}
+	if !strings.Contains(resultStr, "response.content_part.added") {
+		t.Error("expected response.content_part.added")
+	}
+	if !strings.Contains(resultStr, "response.text.delta") {
+		t.Error("expected response.text.delta")
+	}
+	if !strings.Contains(resultStr, `"delta":"Hi"`) {
+		t.Error("expected delta Hi")
+	}
+	if !strings.Contains(resultStr, "response.done") {
+		t.Error("expected response.done")
+	}
+}
+
+// ============================================================
+// Edge: ConvertResponse invalid JSON for new converters
+// ============================================================
+
+func TestConvertResponse_InvalidJSON_NewConverters(t *testing.T) {
+	c1 := &responsesToOpenAIConverter{}
+	_, err := c1.ConvertResponse([]byte("not-json"))
+	if err == nil {
+		t.Error("expected error for invalid JSON")
+	}
+
+	c2 := &openaiToResponsesConverter{}
+	_, err = c2.ConvertResponse([]byte("not-json"))
+	if err == nil {
+		t.Error("expected error for invalid JSON")
+	}
+
+	c3 := &responsesToAnthropicConverter{}
+	_, err = c3.ConvertResponse([]byte("not-json"))
+	if err == nil {
+		t.Error("expected error for invalid JSON")
+	}
+
+	c4 := &anthropicToResponsesConverter{}
+	_, err = c4.ConvertResponse([]byte("not-json"))
+	if err == nil {
+		t.Error("expected error for invalid JSON")
+	}
+}
+
+// ============================================================
+// Edge: unknown field passthrough in response — new converters
+// ============================================================
+
+func TestResponsesToOpenAI_UnknownFieldPassthrough(t *testing.T) {
+	c := &responsesToOpenAIConverter{}
+	body := []byte(`{"id":"1","object":"response","output":[],"custom_field":"custom_value"}`)
+	out, _ := c.ConvertResponse(body)
+	var o map[string]interface{}
+	json.Unmarshal(out, &o)
+	if o["custom_field"] != "custom_value" {
+		t.Error("expected custom_field passthrough")
+	}
+}
+
+func TestOpenAIToResponses_UnknownFieldPassthrough(t *testing.T) {
+	c := &openaiToResponsesConverter{}
+	body := []byte(`{"id":"1","object":"chat.completion","choices":[],"special":true}`)
+	out, _ := c.ConvertResponse(body)
+	var o map[string]interface{}
+	json.Unmarshal(out, &o)
+	if o["special"] != true {
+		t.Error("expected special field passthrough")
+	}
+}
+
+func TestResponsesToAnthropic_UnknownFieldPassthrough(t *testing.T) {
+	c := &responsesToAnthropicConverter{}
+	body := []byte(`{"id":"1","object":"response","output":[],"my_field":"x"}`)
+	out, _ := c.ConvertResponse(body)
+	var o map[string]interface{}
+	json.Unmarshal(out, &o)
+	if o["my_field"] != "x" {
+		t.Error("expected my_field passthrough")
+	}
+}
+
+func TestAnthropicToResponses_UnknownFieldPassthrough(t *testing.T) {
+	c := &anthropicToResponsesConverter{}
+	body := []byte(`{"id":"1","type":"message","content":[],"my_key":"my_val"}`)
+	out, _ := c.ConvertResponse(body)
+	var o map[string]interface{}
+	json.Unmarshal(out, &o)
+	if o["my_key"] != "my_val" {
+		t.Error("expected my_key passthrough")
+	}
+}
