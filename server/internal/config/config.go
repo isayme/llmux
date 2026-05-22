@@ -79,6 +79,21 @@ type ModelAlias struct {
 	Enabled bool `json:"enabled" mapstructure:"enabled"`
 }
 
+// TraceConfig trace configuration
+type TraceConfig struct {
+	Enabled  bool           `json:"enabled" mapstructure:"enabled"`
+	Exporter string         `json:"exporter" mapstructure:"exporter"`
+	Endpoint string         `json:"endpoint" mapstructure:"endpoint"`
+	Sampling SamplingConfig `json:"sampling" mapstructure:"sampling"`
+}
+
+// SamplingConfig trace sampling configuration
+type SamplingConfig struct {
+	Ratio          float64 `json:"ratio" mapstructure:"ratio"`
+	ForceOnError   bool    `json:"force_on_error" mapstructure:"force_on_error"`
+	ForceOnLatency string  `json:"force_on_latency" mapstructure:"force_on_latency"`
+}
+
 type Config struct {
 	Server ServerConfig `json:"server" mapstructure:"server"`
 
@@ -87,6 +102,8 @@ type Config struct {
 	Aliases map[string]*ModelAlias `json:"aliases" mapstructure:"aliases"`
 
 	APIKeys []*ApiKeyConfig `json:"api_keys" mapstructure:"api_keys"`
+
+	Trace TraceConfig `json:"trace" mapstructure:"trace"`
 }
 
 var globalConfig *Config
