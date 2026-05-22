@@ -22,7 +22,7 @@ func main() {
 
 	// Initialize tracing
 	cfg := config.Get().Trace
-	tp, err := trace.Init(cfg.Enabled, cfg.Exporter, cfg.Endpoint)
+	tp, err := trace.Init(cfg.Enabled, cfg.Exporter, cfg.Endpoint, cfg.Sampling.Ratio)
 	if err != nil {
 		slog.Error("trace init failed", "err", err)
 		os.Exit(-1)

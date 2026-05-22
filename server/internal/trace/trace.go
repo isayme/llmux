@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"math/rand"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp"
@@ -16,8 +17,24 @@ import (
 
 var Tracer = noop.NewTracerProvider().Tracer("llmux")
 
+// configurableSampler implements sdktrace.Sampler with a probability ratio.
+type configurableSampler struct {
+	ratio float64
+}
+
+func (s configurableSampler) ShouldSample(p sdktrace.SamplingParameters) sdktrace.SamplingResult {
+	if rand.Float64() < s.ratio {
+		return sdktrace.SamplingResult{Decision: sdktrace.RecordAndSample}
+	}
+	return sdktrace.SamplingResult{Decision: sdktrace.Drop}
+}
+
+func (s configurableSampler) Description() string {
+	return fmt.Sprintf("ConfigurableSampler{ratio=%.2f}", s.ratio)
+}
+
 // Init creates a TracerProvider based on config. Returns nil when disabled.
-func Init(enabled bool, exporter string, endpoint string) (*sdktrace.TracerProvider, error) {
+func Init(enabled bool, exporter string, endpoint string, samplingRatio float64) (*sdktrace.TracerProvider, error) {
 	if !enabled {
 		slog.Info("trace disabled, using noop tracer")
 		return nil, nil
@@ -52,7 +69,7 @@ func Init(enabled bool, exporter string, endpoint string) (*sdktrace.TracerProvi
 	tp := sdktrace.NewTracerProvider(
 		sdktrace.WithBatcher(exp),
 		sdktrace.WithResource(res),
-		sdktrace.WithSampler(sdktrace.AlwaysSample()),
+		sdktrace.WithSampler(configurableSampler{ratio: samplingRatio}),
 	)
 
 	otel.SetTracerProvider(tp)
