@@ -4,8 +4,8 @@
 
 ## 功能特性
 
-- **多 Provider 支持**：支持配置多个 LLM 服务提供商（OpenAI / Anthropic 协议）
-- **协议转换**：自动双向转换 OpenAI ↔ Anthropic 请求和响应（含 SSE 流式）
+- **多 Provider 支持**：支持配置多个 LLM 服务提供商（OpenAI / Anthropic / OpenAI Responses 协议）
+- **协议转换**：自动双向转换 OpenAI Chat、OpenAI Responses、Anthropic Messages 三种协议之间的请求和响应（含 SSE 流式）
 - **API Key 管理**：支持多个 API Key，用于访问控制
 - **模型别名**：支持为模型设置别名，支持 random、round-robin、fallback 调度策略
 - **统一接口**：提供 OpenAI 兼容和 Anthropic 兼容的 API
@@ -30,7 +30,7 @@ api_keys:
 
 providers:
   provider1:
-    type: openai          # openai 或 anthropic
+    type: openai          # openai / anthropic / openai_responses
     name: "Provider 1"
     base_url: "https://api.openai.com/v1"
     api_key: "sk-xxx"
@@ -79,6 +79,16 @@ curl http://localhost:8080/v1/chat/completions \
 # List Models
 curl http://localhost:8080/v1/models \
   -H "Authorization: Bearer your-api-key"
+```
+
+### OpenAI Responses 兼容接口
+
+```bash
+# Responses（支持访问任意类型的 Provider）
+curl http://localhost:8080/v1/responses \
+  -H "Authorization: Bearer your-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{"model": "my-model", "input": "Hello"}'
 ```
 
 ### Anthropic 兼容接口

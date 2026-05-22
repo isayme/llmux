@@ -128,7 +128,7 @@ GET /version
 
 ### 协议转换说明
 
-LLMux 支持 **双向协议转换**：可以用 OpenAI 协议访问 Anthropic 类型的 Provider，也可以用 Anthropic 协议访问 OpenAI 类型的 Provider。服务端会自动完成请求体和响应体的格式转换（包括 SSE 流式传输）。
+LLMux 支持 **双向协议转换**：可以用 OpenAI 协议访问 Anthropic 类型的 Provider，可以用 Anthropic 协议访问 OpenAI 类型的 Provider，也可以用 OpenAI Responses 协议访问任意类型的 Provider。服务端会自动完成请求体和响应体的格式转换（包括 SSE 流式传输）。
 
 ### OpenAI Chat Completions
 
@@ -227,6 +227,39 @@ anthropic-version: 2023-06-01
 
 ---
 
+### OpenAI Responses
+
+```http
+POST /v1/responses
+```
+
+**请求头：**
+
+```
+Authorization: Bearer <api_key>
+Content-Type: application/json
+```
+
+**请求体：**
+
+```json
+{
+  "model": "alias-name",
+  "input": "Hello",
+  "stream": false
+}
+```
+
+**说明：**
+- `model` 可以是别名名称，也可以是 `provider_id/model_name` 格式
+- `input` 支持字符串（单条 user 消息）或 input item 数组
+- `instructions` 可选，对应 system prompt
+- `max_output_tokens` 可选，对应 `max_tokens`
+- 支持 stream 模式
+- 可以访问任意类型的 Provider（OpenAI Chat、Anthropic、或 OpenAI Responses），协议自动转换
+
+---
+
 ## 错误响应
 
 ### OpenAI 接口错误格式
@@ -249,6 +282,18 @@ anthropic-version: 2023-06-01
   "error": {
     "message": "error message",
     "type": "BadRequest"
+  }
+}
+```
+
+### OpenAI Responses 接口错误格式
+
+```json
+{
+  "type": "error",
+  "error": {
+    "code": "api_error",
+    "message": "error message"
   }
 }
 ```

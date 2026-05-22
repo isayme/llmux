@@ -1,10 +1,11 @@
 import { Button } from '@/components/ui/Button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/Card';
-import { BookOpen, Check, Code2, Copy, Terminal } from 'lucide-react';
+import { BookOpen, Check, Code2, Copy, MessageSquare, Terminal } from 'lucide-react';
 import { useState } from 'react';
 
 const sections = [
   { id: 'openai', title: 'OpenAI-compatible API', icon: Terminal },
+  { id: 'responses', title: 'OpenAI Responses API', icon: MessageSquare },
   { id: 'anthropic', title: 'Anthropic-compatible API', icon: Code2 },
   { id: 'model-format', title: 'Model Format', icon: BookOpen },
   { id: 'protocol-conversion', title: 'Protocol Conversion' },
@@ -47,8 +48,8 @@ export function GettingStartedPage() {
       <div>
         <h1 className="text-3xl font-bold tracking-tight">Getting Started</h1>
         <p className="mt-2 text-[hsl(var(--muted-foreground))]">
-          Connect your LLM clients to LLMux using either OpenAI or Anthropic API format.
-          Protocol conversion happens automatically — you can access any provider through either interface.
+          Connect your LLM clients to LLMux using OpenAI Chat, OpenAI Responses, or Anthropic Messages API format.
+          Protocol conversion happens automatically — you can access any provider through any interface.
         </p>
       </div>
 
@@ -147,6 +148,80 @@ GET  ${baseURL}/v1/models               # List available models`}
         </Card>
       </div>
 
+      {/* OpenAI Responses Section */}
+      <div id="responses">
+        <Card>
+          <CardHeader>
+            <div className="flex items-center gap-2">
+              <MessageSquare className="h-5 w-5 text-[hsl(var(--primary))]" />
+              <CardTitle className="text-lg">OpenAI Responses API</CardTitle>
+            </div>
+            <CardDescription>
+              Use the OpenAI Responses API format. LLMux auto-converts between Responses, Chat, and Anthropic protocols.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div>
+              <h4 className="text-sm font-medium">Base URL</h4>
+              <CodeBlock code={`${baseURL}/v1`} language="url" />
+            </div>
+
+            <div>
+              <h4 className="text-sm font-medium">Authentication</h4>
+              <CodeBlock
+                language="header"
+                code={`Authorization: Bearer <your-api-key>`}
+              />
+            </div>
+
+            <div>
+              <h4 className="text-sm font-medium">Example: cURL</h4>
+              <CodeBlock
+                language="bash"
+                code={`curl ${baseURL}/v1/responses \\
+  -H "Authorization: Bearer <your-api-key>" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "model": "<alias-or-provider/model>",
+    "input": "Hello!",
+    "stream": true
+  }'`}
+              />
+            </div>
+
+            <div>
+              <h4 className="text-sm font-medium">Example: OpenAI Python SDK (Responses)</h4>
+              <CodeBlock
+                language="python"
+                code={`from openai import OpenAI
+
+client = OpenAI(
+    base_url="${baseURL}/v1",
+    api_key="<your-api-key>",
+)
+
+response = client.responses.create(
+    model="<alias-or-provider/model>",
+    input="Hello!",
+    stream=True,
+)
+for event in response:
+    if hasattr(event, "delta"):
+        print(event.delta, end="")`}
+              />
+            </div>
+
+            <div>
+              <h4 className="text-sm font-medium">Available Endpoints</h4>
+              <CodeBlock
+                language="plain"
+                code={`POST ${baseURL}/v1/responses    # Responses API (streaming supported)`}
+              />
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
       {/* Anthropic Section */}
       <div id="anthropic">
         <Card>
@@ -238,7 +313,7 @@ anthropic-version: 2023-06-01  # optional, auto-added if missing`}
           <CardHeader>
             <CardTitle className="text-lg">Protocol Conversion</CardTitle>
             <CardDescription>
-              LLMux automatically converts requests and responses between OpenAI and Anthropic formats, including SSE streaming.
+              LLMux automatically converts requests and responses between all three protocols (OpenAI Chat, OpenAI Responses, Anthropic Messages), including SSE streaming.
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -253,24 +328,49 @@ anthropic-version: 2023-06-01  # optional, auto-added if missing`}
                 </thead>
                 <tbody className="text-[hsl(var(--muted-foreground))]">
                   <tr className="border-b border-[hsl(var(--border))]">
-                    <td className="py-2 pr-4">OpenAI</td>
-                    <td className="py-2 pr-4">OpenAI</td>
-                    <td className="py-2">Passthrough (no conversion)</td>
+                    <td className="py-2 pr-4">OpenAI Chat</td>
+                    <td className="py-2 pr-4">openai</td>
+                    <td className="py-2">Passthrough</td>
                   </tr>
                   <tr className="border-b border-[hsl(var(--border))]">
-                    <td className="py-2 pr-4">OpenAI</td>
-                    <td className="py-2 pr-4">Anthropic</td>
+                    <td className="py-2 pr-4">OpenAI Chat</td>
+                    <td className="py-2 pr-4">anthropic</td>
                     <td className="py-2">Auto-converted</td>
                   </tr>
                   <tr className="border-b border-[hsl(var(--border))]">
-                    <td className="py-2 pr-4">Anthropic</td>
-                    <td className="py-2 pr-4">OpenAI</td>
+                    <td className="py-2 pr-4">OpenAI Chat</td>
+                    <td className="py-2 pr-4">openai_responses</td>
+                    <td className="py-2">Auto-converted</td>
+                  </tr>
+                  <tr className="border-b border-[hsl(var(--border))]">
+                    <td className="py-2 pr-4">Anthropic Messages</td>
+                    <td className="py-2 pr-4">openai</td>
+                    <td className="py-2">Auto-converted</td>
+                  </tr>
+                  <tr className="border-b border-[hsl(var(--border))]">
+                    <td className="py-2 pr-4">Anthropic Messages</td>
+                    <td className="py-2 pr-4">anthropic</td>
+                    <td className="py-2">Passthrough</td>
+                  </tr>
+                  <tr className="border-b border-[hsl(var(--border))]">
+                    <td className="py-2 pr-4">Anthropic Messages</td>
+                    <td className="py-2 pr-4">openai_responses</td>
+                    <td className="py-2">Auto-converted</td>
+                  </tr>
+                  <tr className="border-b border-[hsl(var(--border))]">
+                    <td className="py-2 pr-4">OpenAI Responses</td>
+                    <td className="py-2 pr-4">openai</td>
+                    <td className="py-2">Auto-converted</td>
+                  </tr>
+                  <tr className="border-b border-[hsl(var(--border))]">
+                    <td className="py-2 pr-4">OpenAI Responses</td>
+                    <td className="py-2 pr-4">anthropic</td>
                     <td className="py-2">Auto-converted</td>
                   </tr>
                   <tr>
-                    <td className="py-2 pr-4">Anthropic</td>
-                    <td className="py-2 pr-4">Anthropic</td>
-                    <td className="py-2">Passthrough (no conversion)</td>
+                    <td className="py-2 pr-4">OpenAI Responses</td>
+                    <td className="py-2 pr-4">openai_responses</td>
+                    <td className="py-2">Passthrough</td>
                   </tr>
                 </tbody>
               </table>
