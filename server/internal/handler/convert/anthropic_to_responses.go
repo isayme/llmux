@@ -52,6 +52,18 @@ func (c *anthropicToResponsesConverter) ConvertRequest(req any) (any, error) {
 		}
 	}
 
+	// Unmapped Anthropic fields that have Responses equivalents (not yet implemented):
+	//   Temperature → OpenAIResponsesRequest.Temperature
+	//   TopP → OpenAIResponsesRequest.TopP
+	//   Stream → OpenAIResponsesRequest.Stream
+	//   StopSequences → OpenAIResponsesRequest.Stop (different format)
+	//   Tools/ToolChoice → OpenAIResponsesRequest.Tools/ToolChoice
+	//   Metadata → OpenAIResponsesRequest.Metadata
+	//   Thinking → OpenAIResponsesRequest.Reasoning (partial)
+	//   OutputConfig → OpenAIResponsesRequest.Text (partial)
+	// Unmapped — no Responses equivalent:
+	//   TopK
+
 	return respReq, nil
 }
 

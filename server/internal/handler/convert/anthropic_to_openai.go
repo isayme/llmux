@@ -47,6 +47,14 @@ func (c *anthropicToOpenAIConverter) ConvertRequest(req any) (any, error) {
 		oaiReq.Stop = &OpenAIChatCompletionStop{Values: anthReq.StopSequences}
 	}
 
+	// Unmapped Anthropic fields that have OpenAI equivalents (not yet implemented):
+	//   Thinking → OpenAI ReasoningEffort
+	//   Tools/ToolChoice → OpenAI Tools/ToolChoice
+	//   Metadata → OpenAI Metadata
+	//   OutputConfig → OpenAI ResponseFormat
+	// Unmapped — no OpenAI equivalent:
+	//   TopK
+
 	return oaiReq, nil
 }
 
@@ -80,6 +88,13 @@ func (c *anthropicToOpenAIConverter) ConvertResponse(body []byte) ([]byte, error
 			OutputTokens: oaiResp.Usage.CompletionTokens,
 		}
 	}
+
+	// Unmapped OpenAI Chat response fields:
+	//   Choices[].Message.ToolCalls → not converted to Anthropic tool_use blocks
+	//   Choices[].Message.Refusal → not converted
+	//   Choices[].Message.Audio → no Anthropic equivalent
+	//   Choices[].Message.FunctionCall → deprecated
+	//   ServiceTier, SystemFingerprint → no Anthropic equivalent
 
 	return json.Marshal(anthResp)
 }

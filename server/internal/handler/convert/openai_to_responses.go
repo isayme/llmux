@@ -48,6 +48,23 @@ func (c *openaiToResponsesConverter) ConvertRequest(req any) (any, error) {
 		respReq.Instructions = strings.Join(instructions, "\n\n")
 	}
 
+	// Unmapped OpenAI Chat fields that have Responses equivalents (not yet implemented):
+	//   Temperature → OpenAIResponsesRequest.Temperature
+	//   TopP → OpenAIResponsesRequest.TopP
+	//   Stream → OpenAIResponsesRequest.Stream
+	//   Stop → OpenAIResponsesRequest.Stop
+	//   Store → OpenAIResponsesRequest.Store
+	//   Metadata → OpenAIResponsesRequest.Metadata
+	//   Tools/ToolChoice → OpenAIResponsesRequest.Tools/ToolChoice
+	//   ReasoningEffort → OpenAIResponsesRequest.Reasoning
+	//   ResponseFormat → OpenAIResponsesRequest.Text
+	//   FrequencyPenalty, PresencePenalty → both have equivalents
+	//   ServiceTier → OpenAIResponsesRequest.ServiceTier
+	//   ParallelToolCalls → OpenAIResponsesRequest.ParallelToolCalls
+	//   TopLogprobs, PromptCacheKey, PromptCacheRetention → both have equivalents
+	// Unmapped — no Responses equivalent:
+	//   LogitBias, Seed, Prediction, Modalities, N, User (deprecated)
+
 	return respReq, nil
 }
 
@@ -87,6 +104,11 @@ func (c *openaiToResponsesConverter) ConvertResponse(body []byte) ([]byte, error
 			TotalTokens:  oaiResp.Usage.TotalTokens,
 		}
 	}
+
+	// Unmapped OpenAI Chat response fields:
+	//   Choices[].Message.ToolCalls → not converted to Responses function_call/custom items
+	//   Choices[].Message.Refusal → no Responses equivalent
+	//   ServiceTier, SystemFingerprint → no Responses equivalent
 
 	return json.Marshal(respResp)
 }

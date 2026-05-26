@@ -51,6 +51,20 @@ func (c *responsesToAnthropicConverter) ConvertRequest(req any) (any, error) {
 		anthReq.Messages = messages
 	}
 
+	// Unmapped OpenAI Responses fields that have Anthropic equivalents (not yet implemented):
+	//   Temperature → AnthropicMessageRequest.Temperature
+	//   TopP → AnthropicMessageRequest.TopP
+	//   Stream → AnthropicMessageRequest.Stream
+	//   Stop → AnthropicMessageRequest.StopSequences (different format)
+	//   Tools/ToolChoice → AnthropicMessageRequest.Tools/ToolChoice
+	//   Metadata → AnthropicMessageRequest.Metadata (different type)
+	//   Reasoning → AnthropicMessageRequest.Thinking (partial)
+	//   Text → AnthropicMessageRequest.OutputConfig (partial)
+	// Unmapped — no Anthropic equivalent:
+	//   FrequencyPenalty, PresencePenalty, TopLogprobs, ParallelToolCalls,
+	//   ServiceTier, Truncation, Background, PreviousResponseID, Prompt,
+	//   PromptCacheKey/PromptCacheRetention (Anthropic uses cache control on blocks)
+
 	return anthReq, nil
 }
 

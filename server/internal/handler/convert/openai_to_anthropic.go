@@ -36,6 +36,16 @@ func (c *openaiToAnthropicConverter) ConvertRequest(req any) (any, error) {
 		anthReq.StopSequences = oaiReq.Stop.Values
 	}
 
+	// Unmapped OpenAI fields that have Anthropic equivalents (not yet implemented):
+	//   Tools/ToolChoice → Anthropic Tools/ToolChoice
+	//   ResponseFormat → Anthropic OutputConfig
+	//   ReasoningEffort → Anthropic Thinking
+	//   Metadata → Anthropic Metadata (different type)
+	// Unmapped — no Anthropic equivalent:
+	//   FrequencyPenalty, PresencePenalty, LogitBias, Seed, ServiceTier, Store,
+	//   MaxCompletionTokens (mapped via MaxTokens), Logprobs, TopLogprobs,
+	//   Modalities, N, User (deprecated)
+
 	return anthReq, nil
 }
 
@@ -116,6 +126,11 @@ func (c *openaiToAnthropicConverter) ConvertResponse(body []byte) ([]byte, error
 			TotalTokens:      anthResp.Usage.InputTokens + anthResp.Usage.OutputTokens,
 		}
 	}
+
+	// Unmapped Anthropic response fields:
+	//   Content blocks beyond first text (tool_use/thinking/redacted_thinking) → not converted
+	//   StopSequence → no equivalent in OpenAI Chat
+	//   StopDetails → no equivalent in OpenAI Chat
 
 	return json.Marshal(oaiResp)
 }

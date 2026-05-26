@@ -51,6 +51,24 @@ func (c *responsesToOpenAIConverter) ConvertRequest(req any) (any, error) {
 		oaiReq.MaxTokens = respReq.MaxOutputTokens
 	}
 
+	// Unmapped OpenAI Responses fields that have Chat equivalents (not yet implemented):
+	//   Temperature → OpenAIChatRequest.Temperature
+	//   TopP → OpenAIChatRequest.TopP
+	//   Stream → OpenAIChatRequest.Stream
+	//   Stop → OpenAIChatRequest.Stop
+	//   Store → OpenAIChatRequest.Store
+	//   Metadata → OpenAIChatRequest.Metadata
+	//   Tools/ToolChoice → OpenAIChatRequest.Tools/ToolChoice
+	//   Reasoning → OpenAIChatRequest.ReasoningEffort
+	//   Text → OpenAIChatRequest.ResponseFormat
+	//   FrequencyPenalty, PresencePenalty → both have equivalents
+	//   ServiceTier → OpenAIChatRequest.ServiceTier
+	//   ParallelToolCalls → OpenAIChatRequest.ParallelToolCalls
+	//   TopLogprobs, PromptCacheKey, PromptCacheRetention → both have equivalents
+	// Unmapped — no Chat equivalent:
+	//   Truncation, Background, PreviousResponseID, Prompt (new feature)
+	//   User (deprecated in both)
+
 	return oaiReq, nil
 }
 
