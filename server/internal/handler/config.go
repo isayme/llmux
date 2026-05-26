@@ -27,8 +27,12 @@ type listAPIKeyResp struct {
 }
 
 func ListAPIKeys(c *gin.Context) {
+	keys := config.Get().APIKeys
+	if keys == nil {
+		keys = make([]*config.ApiKeyConfig, 0)
+	}
 	resp := listAPIKeyResp{
-		APIKeys: config.Get().APIKeys,
+		APIKeys: keys,
 	}
 	c.JSON(http.StatusOK, resp)
 }

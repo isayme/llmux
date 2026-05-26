@@ -1,6 +1,6 @@
 server:
   port: 8080
-  master_key: ""
+  master_key: "$2a$10$rlbRhWBrMgHOwNdz/FjIVugpexi1nc.FOJxPx7LRwdOI6fQk/IqAG"
   session:
     secret_key: ""
     cookie_name: llmux_sid
