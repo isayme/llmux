@@ -69,16 +69,16 @@ func (c *responsesToOpenAIConverter) ConvertResponse(body []byte) ([]byte, error
 			{
 				Index: 0,
 				FinishReason: OpenAIFinishReasonStop,
-				Message: OpenAIChatMessage{
+				Message: OpenAIChatCompletionMessage{
 					Role:    OpenAIRoleAssistant,
-					Content: extractResponsesText(respResp.Output),
+					Content: stringPtr(extractResponsesText(respResp.Output)),
 				},
 			},
 		},
 	}
 
 	if respResp.Usage != nil {
-		oaiResp.Usage = &Usage{
+		oaiResp.Usage = &OpenAICompletionUsage{
 			PromptTokens:     respResp.Usage.InputTokens,
 			CompletionTokens: respResp.Usage.OutputTokens,
 			TotalTokens:      respResp.Usage.TotalTokens,
@@ -145,7 +145,7 @@ func (c *responsesToOpenAIConverter) ConvertSSE(r io.ReadCloser) io.ReadCloser {
 						Choices: []OpenAIChatStreamChoice{
 							{
 								Index: 0,
-								Delta: OpenAIChatDelta{Content: evt.Delta},
+								Delta: OpenAIChatDelta{Content: stringPtr(evt.Delta)},
 							},
 						},
 					}
@@ -163,7 +163,7 @@ func (c *responsesToOpenAIConverter) ConvertSSE(r io.ReadCloser) io.ReadCloser {
 								{
 									Index:         0,
 									Delta:         OpenAIChatDelta{},
-									FinishReason: OpenAIFinishReasonStop,
+									FinishReason: stringPtr(OpenAIFinishReasonStop),
 								},
 							},
 						}

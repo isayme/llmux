@@ -171,16 +171,16 @@ func (c *openaiToResponsesConverter) ConvertSSE(r io.ReadCloser) io.ReadCloser {
 				}
 
 				delta := chunk.Choices[0].Delta
-				if delta.Content != "" {
+				if delta.Content != nil && *delta.Content != "" {
 					hadContent = true
 					writeSSEJSON(pw, ResponsesSSETextDelta, OpenAIResponsesStreamEvent{
 						Type:  ResponsesSSETextDelta,
-						Delta: delta.Content,
+						Delta: *delta.Content,
 					})
 				}
 
 				finishReason := chunk.Choices[0].FinishReason
-				if finishReason != "" {
+				if finishReason != nil && *finishReason != "" {
 					if hadContent {
 						writeSSEJSON(pw, ResponsesSSETextDone, OpenAIResponsesStreamEvent{
 							Type: ResponsesSSETextDone,

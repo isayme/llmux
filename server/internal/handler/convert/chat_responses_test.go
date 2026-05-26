@@ -116,7 +116,7 @@ func TestResponsesToOpenAI_ConvertResponse(t *testing.T) {
 	if len(o.Choices) != 1 {
 		t.Fatal("expected 1 choice")
 	}
-	if o.Choices[0].Message.Content != "Hello world" {
+	if defaultString(o.Choices[0].Message.Content, "") != "Hello world" {
 		t.Errorf("expected Hello world, got %v", o.Choices[0].Message.Content)
 	}
 	if o.Choices[0].Message.Role != OpenAIRoleAssistant {
@@ -152,7 +152,7 @@ func TestResponsesToOpenAI_ConvertResponse_EmptyOutput(t *testing.T) {
 	if len(o.Choices) != 1 {
 		t.Fatal("expected 1 choice")
 	}
-	if o.Choices[0].Message.Content != "" {
+	if defaultString(o.Choices[0].Message.Content, "") != "" {
 		t.Error("expected empty content")
 	}
 }

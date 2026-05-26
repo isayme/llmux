@@ -32,8 +32,8 @@ func (c *openaiToAnthropicConverter) ConvertRequest(req any) (any, error) {
 	if oaiReq.TopP != nil {
 		anthReq.TopP = oaiReq.TopP
 	}
-	if len(oaiReq.Stop) > 0 {
-		anthReq.StopSequences = oaiReq.Stop
+	if oaiReq.Stop != nil && len(oaiReq.Stop.Values) > 0 {
+		anthReq.StopSequences = oaiReq.Stop.Values
 	}
 
 	return anthReq, nil
@@ -67,10 +67,10 @@ func splitSystemMessages(messages []OpenAIChatMessage) (nonSystem []OpenAIChatMe
 	return
 }
 
-func toAnthropicMessages(messages []OpenAIChatMessage) []AnthropicMessage {
-	anth := make([]AnthropicMessage, 0, len(messages))
+func toAnthropicMessages(messages []OpenAIChatMessage) []AnthropicMessageParam {
+	anth := make([]AnthropicMessageParam, 0, len(messages))
 	for _, m := range messages {
-		anth = append(anth, AnthropicMessage{
+		anth = append(anth, AnthropicMessageParam{
 			Role:    m.Role,
 			Content: m.Content,
 		})
@@ -91,6 +91,7 @@ func (c *openaiToAnthropicConverter) ConvertResponse(body []byte) ([]byte, error
 		return nil, err
 	}
 
+	text := extractText(anthResp.Content)
 	oaiResp := OpenAIChatResponse{
 		ID:      anthResp.ID,
 		Object:  OpenAIChatObject,
@@ -99,17 +100,17 @@ func (c *openaiToAnthropicConverter) ConvertResponse(body []byte) ([]byte, error
 		Choices: []OpenAIChatChoice{
 			{
 				Index: 0,
-				Message: OpenAIChatMessage{
+				Message: OpenAIChatCompletionMessage{
 					Role:    OpenAIRoleAssistant,
-					Content: extractText(anthResp.Content),
+					Content: stringPtr(text),
 				},
-				FinishReason: mapAnthropicStopReason(anthResp.StopReason),
+				FinishReason: mapAnthropicStopReason(defaultString(anthResp.StopReason, "")),
 			},
 		},
 	}
 
 	if anthResp.Usage != nil {
-		oaiResp.Usage = &Usage{
+		oaiResp.Usage = &OpenAICompletionUsage{
 			PromptTokens:     anthResp.Usage.InputTokens,
 			CompletionTokens: anthResp.Usage.OutputTokens,
 			TotalTokens:      anthResp.Usage.InputTokens + anthResp.Usage.OutputTokens,
@@ -117,6 +118,13 @@ func (c *openaiToAnthropicConverter) ConvertResponse(body []byte) ([]byte, error
 	}
 
 	return json.Marshal(oaiResp)
+}
+
+func defaultString(v *string, def string) string {
+	if v != nil {
+		return *v
+	}
+	return def
 }
 
 func extractText(blocks []AnthropicContentBlock) string {
@@ -165,63 +173,63 @@ func (c *openaiToAnthropicConverter) ConvertSSE(r io.ReadCloser) io.ReadCloser {
 						model = evt.Message.Model
 					}
 
-				chunk := OpenAIChatStreamChunk{
-					ID:     extractSSEID(event.Data),
-					Object: OpenAIChatStreamChunkObject,
-					Model:  model,
-					Choices: []OpenAIChatStreamChoice{
-						{
-							Index: 0,
-							Delta: OpenAIChatDelta{Role: OpenAIRoleAssistant},
+					chunk := OpenAIChatStreamChunk{
+						ID:     extractSSEID(event.Data),
+						Object: OpenAIChatStreamChunkObject,
+						Model:  model,
+						Choices: []OpenAIChatStreamChoice{
+							{
+								Index: 0,
+								Delta: OpenAIChatDelta{Role: OpenAIRoleAssistant},
+							},
 						},
-					},
-				}
+					}
 					writeSSEJSON(pw, "", chunk)
 
-			case AnthropicSSEContentBlockDeltaEvent:
-				var evt AnthropicSSEEvent
-				if err := json.Unmarshal([]byte(event.Data), &evt); err != nil {
-					continue
-				}
-				if evt.Delta == nil || evt.Delta.Type != AnthropicDeltaTypeTextDelta {
-					continue
-				}
+				case AnthropicSSEContentBlockDeltaEvent:
+					var evt AnthropicSSEEvent
+					if err := json.Unmarshal([]byte(event.Data), &evt); err != nil {
+						continue
+					}
+					if evt.Delta == nil || evt.Delta.Type != AnthropicDeltaTypeTextDelta {
+						continue
+					}
 
-				chunk := OpenAIChatStreamChunk{
-					Object: OpenAIChatStreamChunkObject,
-					Choices: []OpenAIChatStreamChoice{
-						{
-							Index: 0,
-							Delta: OpenAIChatDelta{Content: evt.Delta.Text},
+					chunk := OpenAIChatStreamChunk{
+						Object: OpenAIChatStreamChunkObject,
+						Choices: []OpenAIChatStreamChoice{
+							{
+								Index: 0,
+								Delta: OpenAIChatDelta{Content: stringPtr(evt.Delta.Text)},
+							},
 						},
-					},
-				}
-				writeSSEJSON(pw, "", chunk)
+					}
+					writeSSEJSON(pw, "", chunk)
 
-			case AnthropicSSEMessageDeltaEvent:
-				var evt AnthropicSSEEvent
-				if err := json.Unmarshal([]byte(event.Data), &evt); err != nil {
-					continue
-				}
-				stopReason := ""
-				if evt.Delta != nil {
-					stopReason = evt.Delta.StopReason
-				}
+				case AnthropicSSEMessageDeltaEvent:
+					var evt AnthropicSSEEvent
+					if err := json.Unmarshal([]byte(event.Data), &evt); err != nil {
+						continue
+					}
+					stopReason := ""
+					if evt.Delta != nil {
+						stopReason = defaultString(evt.Delta.StopReason, "")
+					}
 
-				chunk := OpenAIChatStreamChunk{
-					Object: OpenAIChatStreamChunkObject,
-					Choices: []OpenAIChatStreamChoice{
-						{
-							Index:         0,
-							Delta:         OpenAIChatDelta{},
-							FinishReason:  mapAnthropicStopReason(stopReason),
+					chunk := OpenAIChatStreamChunk{
+						Object: OpenAIChatStreamChunkObject,
+						Choices: []OpenAIChatStreamChoice{
+							{
+								Index:         0,
+								Delta:         OpenAIChatDelta{},
+								FinishReason:  stringPtr(mapAnthropicStopReason(stopReason)),
+							},
 						},
-					},
-				}
-				writeSSEJSON(pw, "", chunk)
+					}
+					writeSSEJSON(pw, "", chunk)
 
-			case AnthropicSSEMessageStopEvent:
-				WriteSSE(pw, SSEEvent{Data: SSEDoneMarker})
+				case AnthropicSSEMessageStopEvent:
+					WriteSSE(pw, SSEEvent{Data: SSEDoneMarker})
 
 				case AnthropicSSEPingEvent:
 				}

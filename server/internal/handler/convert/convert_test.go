@@ -341,7 +341,7 @@ func TestRoundTrip_RequestJSON(t *testing.T) {
 			{Role: "system", Content: "You are helpful."},
 			{Role: "user", Content: "Hello"},
 		},
-		Stop: []string{"END"},
+		Stop: &OpenAIChatCompletionStop{Values: []string{"END"}},
 	}
 
 	c := &openaiToAnthropicConverter{}

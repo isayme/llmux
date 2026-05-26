@@ -135,7 +135,7 @@ func TestAnthropicToResponses_ConvertRequest(t *testing.T) {
 	c := &anthropicToResponsesConverter{}
 	req := &AnthropicRequest{
 		Model: "claude-3",
-		Messages: []AnthropicMessage{
+		Messages: []AnthropicMessageParam{
 			{Role: AnthropicRoleUser, Content: "Hi!"},
 		},
 		System:    "Be helpful.",
@@ -178,7 +178,7 @@ func TestAnthropicToResponses_ConvertRequest(t *testing.T) {
 func TestAnthropicToResponses_ConvertRequest_NoSystem(t *testing.T) {
 	c := &anthropicToResponsesConverter{}
 	req := &AnthropicRequest{
-		Messages: []AnthropicMessage{
+		Messages: []AnthropicMessageParam{
 			{Role: AnthropicRoleUser, Content: "Hi"},
 		},
 	}

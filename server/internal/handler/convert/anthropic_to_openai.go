@@ -44,7 +44,7 @@ func (c *anthropicToOpenAIConverter) ConvertRequest(req any) (any, error) {
 		oaiReq.TopP = anthReq.TopP
 	}
 	if len(anthReq.StopSequences) > 0 {
-		oaiReq.Stop = anthReq.StopSequences
+		oaiReq.Stop = &OpenAIChatCompletionStop{Values: anthReq.StopSequences}
 	}
 
 	return oaiReq, nil
@@ -71,7 +71,7 @@ func (c *anthropicToOpenAIConverter) ConvertResponse(body []byte) ([]byte, error
 				Text: extractChatContent(oaiResp.Choices),
 			},
 		},
-		StopReason: mapOpenAIFinishReason(extractFinishReason(oaiResp.Choices)),
+		StopReason: stringPtr(mapOpenAIFinishReason(extractFinishReason(oaiResp.Choices))),
 	}
 
 	if oaiResp.Usage != nil {
@@ -84,12 +84,15 @@ func (c *anthropicToOpenAIConverter) ConvertResponse(body []byte) ([]byte, error
 	return json.Marshal(anthResp)
 }
 
+func stringPtr(s string) *string {
+	return &s
+}
+
 func extractChatContent(choices []OpenAIChatChoice) string {
-	if len(choices) == 0 {
+	if len(choices) == 0 || choices[0].Message.Content == nil {
 		return ""
 	}
-	content, _ := choices[0].Message.Content.(string)
-	return content
+	return *choices[0].Message.Content
 }
 
 func extractFinishReason(choices []OpenAIChatChoice) string {
@@ -183,20 +186,20 @@ func (c *anthropicToOpenAIConverter) ConvertSSE(r io.ReadCloser) io.ReadCloser {
 				}
 
 				delta := chunk.Choices[0].Delta
-				if delta.Content != "" {
+				if delta.Content != nil && *delta.Content != "" {
 					writeSSEJSON(pw, AnthropicSSEContentBlockDeltaEvent, AnthropicSSEEvent{
 						Type:  AnthropicSSEContentBlockDeltaEvent,
 						Index: intPtr(0),
 						Delta: &AnthropicSSEDelta{
 							Type: AnthropicDeltaTypeTextDelta,
-							Text: delta.Content,
+							Text: *delta.Content,
 						},
 					})
 					outputTokens++
 				}
 
 				finishReason := chunk.Choices[0].FinishReason
-				if finishReason != "" {
+				if finishReason != nil && *finishReason != "" {
 					writeSSEJSON(pw, AnthropicSSEContentBlockStopEvent, AnthropicSSEEvent{
 						Type:  AnthropicSSEContentBlockStopEvent,
 						Index: intPtr(0),
@@ -205,9 +208,9 @@ func (c *anthropicToOpenAIConverter) ConvertSSE(r io.ReadCloser) io.ReadCloser {
 					writeSSEJSON(pw, AnthropicSSEMessageDeltaEvent, AnthropicSSEEvent{
 						Type: AnthropicSSEMessageDeltaEvent,
 						Delta: &AnthropicSSEDelta{
-							StopReason: mapOpenAIFinishReason(finishReason),
+							StopReason: stringPtr(mapOpenAIFinishReason(*finishReason)),
 						},
-						Usage: &AnthropicUsage{
+						Usage: &AnthropicMessageDeltaUsage{
 							OutputTokens: outputTokens,
 						},
 					})

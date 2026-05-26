@@ -30,18 +30,18 @@ func (c *responsesToAnthropicConverter) ConvertRequest(req any) (any, error) {
 
 	switch input := respReq.Input.(type) {
 	case string:
-		anthReq.Messages = []AnthropicMessage{
+		anthReq.Messages = []AnthropicMessageParam{
 			{
 				Role:    AnthropicRoleUser,
 				Content: input,
 			},
 		}
 	case []interface{}:
-		var messages []AnthropicMessage
+		var messages []AnthropicMessageParam
 		for _, item := range input {
 			if m, ok := item.(map[string]interface{}); ok {
 				if m["type"] == "message" {
-					messages = append(messages, AnthropicMessage{
+					messages = append(messages, AnthropicMessageParam{
 						Role:    m["role"].(string),
 						Content: m["content"],
 					})
@@ -65,7 +65,7 @@ func (c *responsesToAnthropicConverter) ConvertResponse(body []byte) ([]byte, er
 		Type:       AnthropicObjectMessage,
 		Role:       AnthropicRoleAssistant,
 		Model:      respResp.Model,
-		StopReason: AnthropicStopReasonEndTurn,
+							StopReason: stringPtr(AnthropicStopReasonEndTurn),
 		Content: []AnthropicContentBlock{
 			{
 				Type: AnthropicContentTypeText,
@@ -158,7 +158,7 @@ func (c *responsesToAnthropicConverter) ConvertSSE(r io.ReadCloser) io.ReadClose
 						writeSSEJSON(pw, AnthropicSSEMessageDeltaEvent, AnthropicSSEEvent{
 							Type: AnthropicSSEMessageDeltaEvent,
 							Delta: &AnthropicSSEDelta{
-								StopReason: AnthropicStopReasonEndTurn,
+		StopReason: stringPtr(AnthropicStopReasonEndTurn),
 							},
 						})
 						writeSSEJSON(pw, AnthropicSSEMessageStopEvent, AnthropicSSEEvent{

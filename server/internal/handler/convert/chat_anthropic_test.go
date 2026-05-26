@@ -79,7 +79,7 @@ func TestOpenAIToAnthropic_NoSystemMessage(t *testing.T) {
 func TestOpenAIToAnthropic_StopSequences(t *testing.T) {
 	c := &openaiToAnthropicConverter{}
 	req := &OpenAIChatRequest{
-		Stop: []string{"END"},
+		Stop: &OpenAIChatCompletionStop{Values: []string{"END"}},
 	}
 	result, err := c.ConvertRequest(req)
 	if err != nil {
@@ -188,7 +188,7 @@ func TestOpenAIToAnthropic_ConvertResponse(t *testing.T) {
 	if len(o.Choices) != 1 {
 		t.Fatal("expected 1 choice")
 	}
-	if o.Choices[0].Message.Content != "Hello world" {
+	if defaultString(o.Choices[0].Message.Content, "") != "Hello world" {
 		t.Errorf("expected Hello world, got %v", o.Choices[0].Message.Content)
 	}
 	if o.Choices[0].FinishReason != OpenAIFinishReasonStop {
@@ -236,7 +236,7 @@ func TestOpenAIToAnthropic_ConvertResponse_EmptyContent(t *testing.T) {
 	out, _ := c.ConvertResponse(body)
 	var o OpenAIChatResponse
 	json.Unmarshal(out, &o)
-	if o.Choices[0].Message.Content != "" {
+	if defaultString(o.Choices[0].Message.Content, "") != "" {
 		t.Error("expected empty content")
 	}
 }
@@ -250,7 +250,7 @@ func TestAnthropicToOpenAI_SystemString(t *testing.T) {
 	req := &AnthropicRequest{
 		Model:  "claude-3",
 		System: "You are helpful.",
-		Messages: []AnthropicMessage{
+		Messages: []AnthropicMessageParam{
 			{Role: OpenAIRoleUser, Content: "Hi"},
 		},
 	}
@@ -274,7 +274,7 @@ func TestAnthropicToOpenAI_SystemString(t *testing.T) {
 func TestAnthropicToOpenAI_NoSystem(t *testing.T) {
 	c := &anthropicToOpenAIConverter{}
 	req := &AnthropicRequest{
-		Messages: []AnthropicMessage{
+		Messages: []AnthropicMessageParam{
 			{Role: AnthropicRoleUser, Content: "Hi"},
 		},
 	}
@@ -300,7 +300,7 @@ func TestAnthropicToOpenAI_StopSequences(t *testing.T) {
 	}
 	out := result.(*OpenAIChatRequest)
 
-	if len(out.Stop) != 2 || out.Stop[0] != "A" {
+	if out.Stop == nil || len(out.Stop.Values) != 2 || out.Stop.Values[0] != "A" {
 		t.Errorf("expected [A B], got %v", out.Stop)
 	}
 }
@@ -313,7 +313,7 @@ func TestAnthropicToOpenAI_NoStopSequences(t *testing.T) {
 	}
 	out := result.(*OpenAIChatRequest)
 
-	if len(out.Stop) != 0 {
+	if out.Stop != nil {
 		t.Error("expected no stop")
 	}
 }
@@ -354,7 +354,7 @@ func TestAnthropicToOpenAI_ConvertResponse(t *testing.T) {
 	if a.Content[0].Text != "Hello" || a.Content[0].Type != AnthropicContentTypeText {
 		t.Errorf("expected text block, got %+v", a.Content[0])
 	}
-	if a.StopReason != AnthropicStopReasonEndTurn {
+	if defaultString(a.StopReason, "") != AnthropicStopReasonEndTurn {
 		t.Errorf("expected end_turn, got %v", a.StopReason)
 	}
 	if a.Usage == nil {
@@ -374,7 +374,7 @@ func TestAnthropicToOpenAI_ConvertResponse_LengthFinish(t *testing.T) {
 	out, _ := c.ConvertResponse(body)
 	var a AnthropicResponse
 	json.Unmarshal(out, &a)
-	if a.StopReason != AnthropicStopReasonMaxTokens {
+	if defaultString(a.StopReason, "") != AnthropicStopReasonMaxTokens {
 		t.Errorf("expected max_tokens, got %v", a.StopReason)
 	}
 }
