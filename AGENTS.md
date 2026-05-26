@@ -18,16 +18,6 @@ LLMux 是一个 LLM 代理服务，主要功能：
   - `handler/config.go` - 配置管理接口
   - `handler/llm_proxy.go` - LLM 代理转发
 
-### 前端 (React + TailwindCSS)
-- **入口**：`web/src/main.tsx`
-- **路由**：`web/src/App.tsx`，基于 `/admin/` 路径
-- **页面**：
-  - `pages/Login.tsx` - 登录页
-  - `pages/Providers.tsx` - Provider 列表
-  - `pages/ApiKeys.tsx` - API Key 列表
-  - `pages/Aliases.tsx` - 别名列表
-- **组件**：`components/Layout.tsx` - 公共布局
-
 ## 关键实现细节
 
 ### 认证机制
@@ -97,12 +87,6 @@ cd server && go test ./internal/handler/convert/... -count=1
 - 配置变更会自动热更新
 - Provider ID 使用 map 的 key，如果为空则自动设置为 key 值
 - Alias Name 使用 map 的 key，如果为空则自动设置为 key 值
-
-### 前端修改
-- TailwindCSS v4 使用 `@import "tailwindcss"` 引入
-- 主题通过 CSS 变量实现，存于 `index.css`
-- 主题切换：设置 `data-theme` 属性（`light` 或 `dark`）
-- 构建后需复制到 server 的 dist 目录或通过静态文件服务
 
 ### 常见问题
 - API Key 页面无数据：检查 `/api/api-keys` 返回格式是否为 `{ api_keys: [] }`
