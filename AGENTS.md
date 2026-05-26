@@ -58,6 +58,19 @@ LLMux 是一个 LLM 代理服务，主要功能：
 - 动态类型字段（如 `messages[].content`）使用 `interface{}`
 - 旧类型名通过 type alias 向后兼容（如 `OpenAIChatRequest` = `OpenAIChatCompletionRequest`）
 
+#### 类型定义来源
+- OpenAI Chat + Responses 类型：基于 `npm:openai` SDK 的 TypeScript 类型定义（`ChatCompletion*`、`Response*` 接口）
+- Anthropic 类型：基于 `npm:@anthropic-ai/sdk` 的 TypeScript 类型定义（`Message*` 接口）
+- 字段名保持与 SDK 一致（如 `MaxCompletionTokens` 而非 `MaxTokens`），Go 中使用协议前缀避免命名冲突
+- 从 SDK 获取最新类型的方法：访问 unpkg/jsdelivr 查看对应 npm 包的类型声明文件
+
+#### 转换函数中未映射字段的注释要求
+- 每个转换函数（`ConvertRequest`/`ConvertResponse`/`ConvertSSE`）中，所有**有等价物但未转换**的字段必须通过注释说明
+- 注释格式：在函数 return 前统一添加注释块，分为两段：
+  - "有等价物但未实现"——列出字段名及对应的目标字段
+  - "无等价物"——列出字段名
+- 无等价物的字段也需注释说明，避免后续开发者反复确认
+
 #### 当前转换覆盖情况
 - 基础字段（model/messages/temperature/top_p/stream/stop）已覆盖
 - **以下字段已有等价物但尚未实现转换**（标注在转换函数的注释中）：
@@ -69,6 +82,7 @@ LLMux 是一个 LLM 代理服务，主要功能：
   - Reasonning ↔ Reasoning：Responses ↔ Chat
   - 以及 Temperature/Stream/Store/ServiceTier/PresencePenalty/FrequencyPenalty/TopLogprobs/PromptCache 等公共参数
 - 响应转换仅处理首个 text content block，tool_use/thinking 等复杂 block 未转换
+- **MCP / Function Calling**：目前三个协议都定义了完整的 Tool 类型结构，但转换函数中尚未实现 Tools/ToolChoice 字段的跨协议映射。MCP Server 的 tool 类型定义在各协议的 Types struct 中已有对应字段，等待转换逻辑实现
 
 #### 测试
 ```bash
