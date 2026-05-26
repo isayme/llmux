@@ -47,11 +47,22 @@ func (c *anthropicToOpenAIConverter) ConvertRequest(req any) (any, error) {
 		oaiReq.Stop = &OpenAIChatCompletionStop{Values: anthReq.StopSequences}
 	}
 
+	if anthReq.Thinking != nil {
+		switch anthReq.Thinking.Type {
+		case AnthropicThinkingDisabled:
+			oaiReq.ReasoningEffort = stringPtr(OpenAIReasoningEffortNone)
+		default:
+			oaiReq.ReasoningEffort = stringPtr(OpenAIReasoningEffortHigh)
+		}
+	}
+	if anthReq.OutputConfig != nil && anthReq.OutputConfig.Effort != "" {
+		oaiReq.ReasoningEffort = stringPtr(mapAnthropicEffortToReasoning(anthReq.OutputConfig.Effort))
+	}
+
 	// Unmapped Anthropic fields that have OpenAI equivalents (not yet implemented):
-	//   Thinking → OpenAI ReasoningEffort
 	//   Tools/ToolChoice → OpenAI Tools/ToolChoice
 	//   Metadata → OpenAI Metadata
-	//   OutputConfig → OpenAI ResponseFormat
+	//   OutputConfig → OpenAI ResponseFormat (only Format part)
 	// Unmapped — no OpenAI equivalent:
 	//   TopK
 
@@ -62,23 +73,34 @@ func intPtr(v int) *int {
 	return &v
 }
 
+func mapAnthropicEffortToReasoning(effort string) string {
+	switch effort {
+	case "low":
+		return OpenAIReasoningEffortLow
+	case "medium":
+		return OpenAIReasoningEffortMedium
+	case "high":
+		return OpenAIReasoningEffortHigh
+	case "xhigh", "max":
+		return OpenAIReasoningEffortXHigh
+	default:
+		return OpenAIReasoningEffortHigh
+	}
+}
+
 func (c *anthropicToOpenAIConverter) ConvertResponse(body []byte) ([]byte, error) {
 	var oaiResp OpenAIChatResponse
 	if err := json.Unmarshal(body, &oaiResp); err != nil {
 		return nil, err
 	}
 
+	content := buildAnthropicContent(oaiResp.Choices)
 	anthResp := AnthropicResponse{
 		ID:    oaiResp.ID,
 		Type:  AnthropicObjectMessage,
 		Role:  AnthropicRoleAssistant,
 		Model: oaiResp.Model,
-		Content: []AnthropicContentBlock{
-			{
-				Type: AnthropicContentTypeText,
-				Text: extractChatContent(oaiResp.Choices),
-			},
-		},
+		Content:    content,
 		StopReason: stringPtr(mapOpenAIFinishReason(extractFinishReason(oaiResp.Choices))),
 	}
 
@@ -101,6 +123,27 @@ func (c *anthropicToOpenAIConverter) ConvertResponse(body []byte) ([]byte, error
 
 func stringPtr(s string) *string {
 	return &s
+}
+
+func buildAnthropicContent(choices []OpenAIChatChoice) []AnthropicContentBlock {
+	if len(choices) == 0 {
+		return nil
+	}
+	msg := choices[0].Message
+	var blocks []AnthropicContentBlock
+	if msg.ReasoningContent != nil && *msg.ReasoningContent != "" {
+		blocks = append(blocks, AnthropicContentBlock{
+			Type:     AnthropicContentTypeThinking,
+			Thinking: *msg.ReasoningContent,
+		})
+	}
+	if msg.Content != nil {
+		blocks = append(blocks, AnthropicContentBlock{
+			Type: AnthropicContentTypeText,
+			Text: *msg.Content,
+		})
+	}
+	return blocks
 }
 
 func extractChatContent(choices []OpenAIChatChoice) string {
@@ -139,6 +182,9 @@ func (c *anthropicToOpenAIConverter) ConvertSSE(r io.ReadCloser) io.ReadCloser {
 		var messageID string
 		var model string
 		var started bool
+		var inThinking bool
+		var textStarted bool
+		var blockIndex int
 		var outputTokens int
 
 		for {
@@ -189,22 +235,56 @@ func (c *anthropicToOpenAIConverter) ConvertSSE(r io.ReadCloser) io.ReadCloser {
 							Usage: &AnthropicUsage{},
 						},
 					})
+				}
 
-					writeSSEJSON(pw, AnthropicSSEContentBlockStartEvent, AnthropicSSEEvent{
-						Type:  AnthropicSSEContentBlockStartEvent,
-						Index: intPtr(0),
-						ContentBlock: &AnthropicContentBlock{
-							Type: AnthropicContentTypeText,
-							Text: "",
+				delta := chunk.Choices[0].Delta
+
+				if delta.ReasoningContent != nil && *delta.ReasoningContent != "" {
+					if !inThinking {
+						writeSSEJSON(pw, AnthropicSSEContentBlockStartEvent, AnthropicSSEEvent{
+							Type:  AnthropicSSEContentBlockStartEvent,
+							Index: intPtr(blockIndex),
+							ContentBlock: &AnthropicContentBlock{
+								Type: AnthropicContentTypeThinking,
+							},
+						})
+						inThinking = true
+					}
+
+					writeSSEJSON(pw, AnthropicSSEContentBlockDeltaEvent, AnthropicSSEEvent{
+						Type:  AnthropicSSEContentBlockDeltaEvent,
+						Index: intPtr(blockIndex),
+						Delta: &AnthropicSSEDelta{
+							Type:     AnthropicDeltaTypeThinkingDelta,
+							Thinking: *delta.ReasoningContent,
 						},
 					})
 				}
 
-				delta := chunk.Choices[0].Delta
 				if delta.Content != nil && *delta.Content != "" {
+					if inThinking {
+						writeSSEJSON(pw, AnthropicSSEContentBlockStopEvent, AnthropicSSEEvent{
+							Type:  AnthropicSSEContentBlockStopEvent,
+							Index: intPtr(blockIndex),
+						})
+						blockIndex++
+						inThinking = false
+					}
+					if !textStarted {
+						writeSSEJSON(pw, AnthropicSSEContentBlockStartEvent, AnthropicSSEEvent{
+							Type:  AnthropicSSEContentBlockStartEvent,
+							Index: intPtr(blockIndex),
+							ContentBlock: &AnthropicContentBlock{
+								Type: AnthropicContentTypeText,
+								Text: "",
+							},
+						})
+						textStarted = true
+					}
+
 					writeSSEJSON(pw, AnthropicSSEContentBlockDeltaEvent, AnthropicSSEEvent{
 						Type:  AnthropicSSEContentBlockDeltaEvent,
-						Index: intPtr(0),
+						Index: intPtr(blockIndex),
 						Delta: &AnthropicSSEDelta{
 							Type: AnthropicDeltaTypeTextDelta,
 							Text: *delta.Content,
@@ -215,10 +295,20 @@ func (c *anthropicToOpenAIConverter) ConvertSSE(r io.ReadCloser) io.ReadCloser {
 
 				finishReason := chunk.Choices[0].FinishReason
 				if finishReason != nil && *finishReason != "" {
-					writeSSEJSON(pw, AnthropicSSEContentBlockStopEvent, AnthropicSSEEvent{
-						Type:  AnthropicSSEContentBlockStopEvent,
-						Index: intPtr(0),
-					})
+					if inThinking {
+						writeSSEJSON(pw, AnthropicSSEContentBlockStopEvent, AnthropicSSEEvent{
+							Type:  AnthropicSSEContentBlockStopEvent,
+							Index: intPtr(blockIndex),
+						})
+						blockIndex++
+						inThinking = false
+					}
+					if textStarted {
+						writeSSEJSON(pw, AnthropicSSEContentBlockStopEvent, AnthropicSSEEvent{
+							Type:  AnthropicSSEContentBlockStopEvent,
+							Index: intPtr(blockIndex),
+						})
+					}
 
 					writeSSEJSON(pw, AnthropicSSEMessageDeltaEvent, AnthropicSSEEvent{
 						Type: AnthropicSSEMessageDeltaEvent,

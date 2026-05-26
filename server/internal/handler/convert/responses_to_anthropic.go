@@ -28,6 +28,23 @@ func (c *responsesToAnthropicConverter) ConvertRequest(req any) (any, error) {
 		anthReq.System = respReq.Instructions
 	}
 
+	if respReq.Reasoning != nil && respReq.Reasoning.Effort != "" {
+		effort := respReq.Reasoning.Effort
+		if effort == OpenAIReasoningEffortNone {
+			anthReq.Thinking = &AnthropicThinkingConfigParam{
+				Type: AnthropicThinkingDisabled,
+			}
+		} else {
+			anthReq.Thinking = &AnthropicThinkingConfigParam{
+				Type:         AnthropicThinkingEnabled,
+				BudgetTokens: 4096,
+			}
+			anthReq.OutputConfig = &AnthropicOutputConfig{
+				Effort: mapReasoningEffortToAnthropic(effort),
+			}
+		}
+	}
+
 	switch input := respReq.Input.(type) {
 	case string:
 		anthReq.Messages = []AnthropicMessageParam{
@@ -58,8 +75,7 @@ func (c *responsesToAnthropicConverter) ConvertRequest(req any) (any, error) {
 	//   Stop → AnthropicMessageRequest.StopSequences (different format)
 	//   Tools/ToolChoice → AnthropicMessageRequest.Tools/ToolChoice
 	//   Metadata → AnthropicMessageRequest.Metadata (different type)
-	//   Reasoning → AnthropicMessageRequest.Thinking (partial)
-	//   Text → AnthropicMessageRequest.OutputConfig (partial)
+	//   Text → AnthropicMessageRequest.OutputConfig (only Format part)
 	// Unmapped — no Anthropic equivalent:
 	//   FrequencyPenalty, PresencePenalty, TopLogprobs, ParallelToolCalls,
 	//   ServiceTier, Truncation, Background, PreviousResponseID, Prompt,

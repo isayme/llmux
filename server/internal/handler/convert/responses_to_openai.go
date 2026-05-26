@@ -51,6 +51,10 @@ func (c *responsesToOpenAIConverter) ConvertRequest(req any) (any, error) {
 		oaiReq.MaxTokens = respReq.MaxOutputTokens
 	}
 
+	if respReq.Reasoning != nil && respReq.Reasoning.Effort != "" {
+		oaiReq.ReasoningEffort = stringPtr(respReq.Reasoning.Effort)
+	}
+
 	// Unmapped OpenAI Responses fields that have Chat equivalents (not yet implemented):
 	//   Temperature → OpenAIChatRequest.Temperature
 	//   TopP → OpenAIChatRequest.TopP
@@ -59,7 +63,6 @@ func (c *responsesToOpenAIConverter) ConvertRequest(req any) (any, error) {
 	//   Store → OpenAIChatRequest.Store
 	//   Metadata → OpenAIChatRequest.Metadata
 	//   Tools/ToolChoice → OpenAIChatRequest.Tools/ToolChoice
-	//   Reasoning → OpenAIChatRequest.ReasoningEffort
 	//   Text → OpenAIChatRequest.ResponseFormat
 	//   FrequencyPenalty, PresencePenalty → both have equivalents
 	//   ServiceTier → OpenAIChatRequest.ServiceTier

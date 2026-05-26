@@ -52,6 +52,20 @@ func (c *anthropicToResponsesConverter) ConvertRequest(req any) (any, error) {
 		}
 	}
 
+	if anthReq.Thinking != nil || anthReq.OutputConfig != nil {
+		effort := ""
+		if anthReq.OutputConfig != nil && anthReq.OutputConfig.Effort != "" {
+			effort = anthReq.OutputConfig.Effort
+		} else if anthReq.Thinking != nil && anthReq.Thinking.Type != AnthropicThinkingDisabled {
+			effort = "high"
+		}
+		if effort != "" {
+			respReq.Reasoning = &OpenAIReasoning{
+				Effort: effort,
+			}
+		}
+	}
+
 	// Unmapped Anthropic fields that have Responses equivalents (not yet implemented):
 	//   Temperature → OpenAIResponsesRequest.Temperature
 	//   TopP → OpenAIResponsesRequest.TopP
@@ -59,8 +73,7 @@ func (c *anthropicToResponsesConverter) ConvertRequest(req any) (any, error) {
 	//   StopSequences → OpenAIResponsesRequest.Stop (different format)
 	//   Tools/ToolChoice → OpenAIResponsesRequest.Tools/ToolChoice
 	//   Metadata → OpenAIResponsesRequest.Metadata
-	//   Thinking → OpenAIResponsesRequest.Reasoning (partial)
-	//   OutputConfig → OpenAIResponsesRequest.Text (partial)
+	//   OutputConfig → OpenAIResponsesRequest.Text (only Format part)
 	// Unmapped — no Responses equivalent:
 	//   TopK
 

@@ -63,6 +63,75 @@ func TestResponsesToAnthropic_InputArray(t *testing.T) {
 	}
 }
 
+func TestResponsesToAnthropic_ReasoningEffortHigh(t *testing.T) {
+	c := &responsesToAnthropicConverter{}
+	req := &OpenAIResponsesRequest{
+		Input: "Hello",
+		Reasoning: &OpenAIReasoning{
+			Effort: OpenAIReasoningEffortHigh,
+		},
+	}
+	result, err := c.ConvertRequest(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := result.(*AnthropicRequest)
+
+	if out.Thinking == nil {
+		t.Fatal("expected Thinking to be set")
+	}
+	if out.Thinking.Type != AnthropicThinkingEnabled {
+		t.Errorf("expected thinking type=enabled, got %q", out.Thinking.Type)
+	}
+	if out.OutputConfig == nil {
+		t.Fatal("expected OutputConfig to be set")
+	}
+	if out.OutputConfig.Effort != "high" {
+		t.Errorf("expected effort=high, got %q", out.OutputConfig.Effort)
+	}
+}
+
+func TestResponsesToAnthropic_ReasoningEffortNone(t *testing.T) {
+	c := &responsesToAnthropicConverter{}
+	req := &OpenAIResponsesRequest{
+		Input: "Hello",
+		Reasoning: &OpenAIReasoning{
+			Effort: OpenAIReasoningEffortNone,
+		},
+	}
+	result, err := c.ConvertRequest(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := result.(*AnthropicRequest)
+
+	if out.Thinking == nil {
+		t.Fatal("expected Thinking to be set")
+	}
+	if out.Thinking.Type != AnthropicThinkingDisabled {
+		t.Errorf("expected thinking type=disabled, got %q", out.Thinking.Type)
+	}
+	if out.OutputConfig != nil {
+		t.Error("expected no OutputConfig for reasoning_effort=none")
+	}
+}
+
+func TestResponsesToAnthropic_NoReasoning(t *testing.T) {
+	c := &responsesToAnthropicConverter{}
+	result, err := c.ConvertRequest(&OpenAIResponsesRequest{Input: "Hello"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := result.(*AnthropicRequest)
+
+	if out.Thinking != nil {
+		t.Error("expected no Thinking when Reasoning not set")
+	}
+	if out.OutputConfig != nil {
+		t.Error("expected no OutputConfig when Reasoning not set")
+	}
+}
+
 func TestResponsesToAnthropic_EmptyInstructions(t *testing.T) {
 	c := &responsesToAnthropicConverter{}
 	req := &OpenAIResponsesRequest{
@@ -172,6 +241,86 @@ func TestAnthropicToResponses_ConvertRequest(t *testing.T) {
 	}
 	if out.MaxOutputTokens == nil || *out.MaxOutputTokens != 100 {
 		t.Errorf("expected max_output_tokens=100, got %v", out.MaxOutputTokens)
+	}
+}
+
+func TestAnthropicToResponses_ThinkingEnabled(t *testing.T) {
+	c := &anthropicToResponsesConverter{}
+	req := &AnthropicRequest{
+		Thinking: &AnthropicThinkingConfigParam{
+			Type:         AnthropicThinkingEnabled,
+			BudgetTokens: 4096,
+		},
+	}
+	result, err := c.ConvertRequest(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := result.(*OpenAIResponsesRequest)
+
+	if out.Reasoning == nil {
+		t.Fatal("expected Reasoning to be set")
+	}
+	if out.Reasoning.Effort != "high" {
+		t.Errorf("expected effort=high, got %q", out.Reasoning.Effort)
+	}
+}
+
+func TestAnthropicToResponses_OutputConfigEffort(t *testing.T) {
+	c := &anthropicToResponsesConverter{}
+	req := &AnthropicRequest{
+		OutputConfig: &AnthropicOutputConfig{
+			Effort: "max",
+		},
+	}
+	result, err := c.ConvertRequest(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := result.(*OpenAIResponsesRequest)
+
+	if out.Reasoning == nil {
+		t.Fatal("expected Reasoning to be set")
+	}
+	if out.Reasoning.Effort != "max" {
+		t.Errorf("expected effort=max, got %q", out.Reasoning.Effort)
+	}
+}
+
+func TestAnthropicToResponses_OutputConfigOverridesThinking(t *testing.T) {
+	c := &anthropicToResponsesConverter{}
+	req := &AnthropicRequest{
+		Thinking: &AnthropicThinkingConfigParam{
+			Type: AnthropicThinkingDisabled,
+		},
+		OutputConfig: &AnthropicOutputConfig{
+			Effort: "low",
+		},
+	}
+	result, err := c.ConvertRequest(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := result.(*OpenAIResponsesRequest)
+
+	if out.Reasoning == nil {
+		t.Fatal("expected Reasoning to be set (OutputConfig overrides)")
+	}
+	if out.Reasoning.Effort != "low" {
+		t.Errorf("expected effort=low from OutputConfig, got %q", out.Reasoning.Effort)
+	}
+}
+
+func TestAnthropicToResponses_NoThinking(t *testing.T) {
+	c := &anthropicToResponsesConverter{}
+	result, err := c.ConvertRequest(&AnthropicRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := result.(*OpenAIResponsesRequest)
+
+	if out.Reasoning != nil {
+		t.Error("expected no Reasoning when Thinking/OutputConfig not set")
 	}
 }
 

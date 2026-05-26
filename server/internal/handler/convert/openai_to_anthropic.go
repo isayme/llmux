@@ -36,10 +36,28 @@ func (c *openaiToAnthropicConverter) ConvertRequest(req any) (any, error) {
 		anthReq.StopSequences = oaiReq.Stop.Values
 	}
 
+	if oaiReq.ReasoningEffort != nil {
+		effort := *oaiReq.ReasoningEffort
+		switch effort {
+		case OpenAIReasoningEffortNone:
+			anthReq.Thinking = &AnthropicThinkingConfigParam{
+				Type: AnthropicThinkingDisabled,
+			}
+		default:
+			budget := calcThinkingBudget(oaiReq.MaxTokens, oaiReq.MaxCompletionTokens)
+			anthReq.Thinking = &AnthropicThinkingConfigParam{
+				Type:         AnthropicThinkingEnabled,
+				BudgetTokens: budget,
+			}
+			anthReq.OutputConfig = &AnthropicOutputConfig{
+				Effort: mapReasoningEffortToAnthropic(effort),
+			}
+		}
+	}
+
 	// Unmapped OpenAI fields that have Anthropic equivalents (not yet implemented):
 	//   Tools/ToolChoice → Anthropic Tools/ToolChoice
-	//   ResponseFormat → Anthropic OutputConfig
-	//   ReasoningEffort → Anthropic Thinking
+	//   ResponseFormat → Anthropic OutputConfig (only Format part)
 	//   Metadata → Anthropic Metadata (different type)
 	// Unmapped — no Anthropic equivalent:
 	//   FrequencyPenalty, PresencePenalty, LogitBias, Seed, ServiceTier, Store,
@@ -95,6 +113,34 @@ func defaultInt(v *int, def int) int {
 	return def
 }
 
+func calcThinkingBudget(maxTokens, maxCompletionTokens *int) int {
+	budget := 4096
+	if maxCompletionTokens != nil && *maxCompletionTokens > 0 {
+		budget = int(float64(*maxCompletionTokens) * 0.8)
+	} else if maxTokens != nil && *maxTokens > 0 {
+		budget = int(float64(*maxTokens) * 0.5)
+	}
+	if budget < 1024 {
+		budget = 1024
+	}
+	return budget
+}
+
+func mapReasoningEffortToAnthropic(effort string) string {
+	switch effort {
+	case OpenAIReasoningEffortMinimal, OpenAIReasoningEffortLow:
+		return "low"
+	case OpenAIReasoningEffortMedium:
+		return "medium"
+	case OpenAIReasoningEffortHigh:
+		return "high"
+	case OpenAIReasoningEffortXHigh:
+		return "max"
+	default:
+		return "high"
+	}
+}
+
 func (c *openaiToAnthropicConverter) ConvertResponse(body []byte) ([]byte, error) {
 	var anthResp AnthropicResponse
 	if err := json.Unmarshal(body, &anthResp); err != nil {
@@ -102,6 +148,16 @@ func (c *openaiToAnthropicConverter) ConvertResponse(body []byte) ([]byte, error
 	}
 
 	text := extractText(anthResp.Content)
+	thinking := extractThinking(anthResp.Content)
+
+	msg := OpenAIChatCompletionMessage{
+		Role:    OpenAIRoleAssistant,
+		Content: stringPtr(text),
+	}
+	if thinking != "" {
+		msg.ReasoningContent = stringPtr(thinking)
+	}
+
 	oaiResp := OpenAIChatResponse{
 		ID:      anthResp.ID,
 		Object:  OpenAIChatObject,
@@ -109,11 +165,8 @@ func (c *openaiToAnthropicConverter) ConvertResponse(body []byte) ([]byte, error
 		Model:   anthResp.Model,
 		Choices: []OpenAIChatChoice{
 			{
-				Index: 0,
-				Message: OpenAIChatCompletionMessage{
-					Role:    OpenAIRoleAssistant,
-					Content: stringPtr(text),
-				},
+				Index:   0,
+				Message: msg,
 				FinishReason: mapAnthropicStopReason(defaultString(anthResp.StopReason, "")),
 			},
 		},
@@ -128,7 +181,7 @@ func (c *openaiToAnthropicConverter) ConvertResponse(body []byte) ([]byte, error
 	}
 
 	// Unmapped Anthropic response fields:
-	//   Content blocks beyond first text (tool_use/thinking/redacted_thinking) → not converted
+	//   Content blocks beyond first text/tool_use/thinking/redacted_thinking → tool_use not converted
 	//   StopSequence → no equivalent in OpenAI Chat
 	//   StopDetails → no equivalent in OpenAI Chat
 
@@ -143,10 +196,22 @@ func defaultString(v *string, def string) string {
 }
 
 func extractText(blocks []AnthropicContentBlock) string {
-	if len(blocks) == 0 {
-		return ""
+	for _, block := range blocks {
+		if block.Type == AnthropicContentTypeText {
+			return block.Text
+		}
 	}
-	return blocks[0].Text
+	return ""
+}
+
+func extractThinking(blocks []AnthropicContentBlock) string {
+	var texts []string
+	for _, block := range blocks {
+		if block.Type == AnthropicContentTypeThinking {
+			texts = append(texts, block.Thinking)
+		}
+	}
+	return strings.Join(texts, "")
 }
 
 func mapAnthropicStopReason(stopReason string) string {
@@ -206,20 +271,37 @@ func (c *openaiToAnthropicConverter) ConvertSSE(r io.ReadCloser) io.ReadCloser {
 					if err := json.Unmarshal([]byte(event.Data), &evt); err != nil {
 						continue
 					}
-					if evt.Delta == nil || evt.Delta.Type != AnthropicDeltaTypeTextDelta {
+					if evt.Delta == nil {
 						continue
 					}
 
-					chunk := OpenAIChatStreamChunk{
-						Object: OpenAIChatStreamChunkObject,
-						Choices: []OpenAIChatStreamChoice{
-							{
-								Index: 0,
-								Delta: OpenAIChatDelta{Content: stringPtr(evt.Delta.Text)},
+					switch evt.Delta.Type {
+					case AnthropicDeltaTypeTextDelta:
+						chunk := OpenAIChatStreamChunk{
+							Object: OpenAIChatStreamChunkObject,
+							Choices: []OpenAIChatStreamChoice{
+								{
+									Index: 0,
+									Delta: OpenAIChatDelta{Content: stringPtr(evt.Delta.Text)},
+								},
 							},
-						},
+						}
+						writeSSEJSON(pw, "", chunk)
+					case AnthropicDeltaTypeThinkingDelta:
+						if evt.Delta.Thinking == "" {
+							continue
+						}
+						chunk := OpenAIChatStreamChunk{
+							Object: OpenAIChatStreamChunkObject,
+							Choices: []OpenAIChatStreamChoice{
+								{
+									Index: 0,
+									Delta: OpenAIChatDelta{ReasoningContent: stringPtr(evt.Delta.Thinking)},
+								},
+							},
+						}
+						writeSSEJSON(pw, "", chunk)
 					}
-					writeSSEJSON(pw, "", chunk)
 
 				case AnthropicSSEMessageDeltaEvent:
 					var evt AnthropicSSEEvent

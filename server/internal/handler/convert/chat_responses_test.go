@@ -62,6 +62,63 @@ func TestResponsesToOpenAI_InputArray(t *testing.T) {
 	}
 }
 
+func TestResponsesToOpenAI_ReasoningEffort(t *testing.T) {
+	c := &responsesToOpenAIConverter{}
+	req := &OpenAIResponsesRequest{
+		Input: "Hello",
+		Reasoning: &OpenAIReasoning{
+			Effort: OpenAIReasoningEffortHigh,
+		},
+	}
+	result, err := c.ConvertRequest(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := result.(*OpenAIChatRequest)
+
+	if out.ReasoningEffort == nil {
+		t.Fatal("expected ReasoningEffort to be set")
+	}
+	if *out.ReasoningEffort != OpenAIReasoningEffortHigh {
+		t.Errorf("expected reasoning_effort=high, got %q", *out.ReasoningEffort)
+	}
+}
+
+func TestResponsesToOpenAI_ReasoningEffortXHigh(t *testing.T) {
+	c := &responsesToOpenAIConverter{}
+	req := &OpenAIResponsesRequest{
+		Input: "Hello",
+		Reasoning: &OpenAIReasoning{
+			Effort: "xhigh",
+		},
+	}
+	result, err := c.ConvertRequest(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := result.(*OpenAIChatRequest)
+
+	if out.ReasoningEffort == nil {
+		t.Fatal("expected ReasoningEffort to be set")
+	}
+	if *out.ReasoningEffort != "xhigh" {
+		t.Errorf("expected reasoning_effort=xhigh, got %q", *out.ReasoningEffort)
+	}
+}
+
+func TestResponsesToOpenAI_NoReasoning(t *testing.T) {
+	c := &responsesToOpenAIConverter{}
+	result, err := c.ConvertRequest(&OpenAIResponsesRequest{Input: "Hello"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := result.(*OpenAIChatRequest)
+
+	if out.ReasoningEffort != nil {
+		t.Error("expected no ReasoningEffort when Reasoning not set")
+	}
+}
+
 func TestResponsesToOpenAI_NoInstructions(t *testing.T) {
 	c := &responsesToOpenAIConverter{}
 	req := &OpenAIResponsesRequest{
@@ -203,6 +260,59 @@ func TestOpenAIToResponses_ConvertRequest(t *testing.T) {
 	}
 	if out.MaxOutputTokens == nil || *out.MaxOutputTokens != 100 {
 		t.Errorf("expected max_output_tokens=100, got %v", out.MaxOutputTokens)
+	}
+}
+
+func TestOpenAIToResponses_ReasoningEffort(t *testing.T) {
+	c := &openaiToResponsesConverter{}
+	effort := OpenAIReasoningEffortHigh
+	req := &OpenAIChatRequest{
+		ReasoningEffort: &effort,
+	}
+	result, err := c.ConvertRequest(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := result.(*OpenAIResponsesRequest)
+
+	if out.Reasoning == nil {
+		t.Fatal("expected Reasoning to be set")
+	}
+	if out.Reasoning.Effort != OpenAIReasoningEffortHigh {
+		t.Errorf("expected effort=high, got %q", out.Reasoning.Effort)
+	}
+}
+
+func TestOpenAIToResponses_ReasoningEffortNone(t *testing.T) {
+	c := &openaiToResponsesConverter{}
+	effort := OpenAIReasoningEffortNone
+	req := &OpenAIChatRequest{
+		ReasoningEffort: &effort,
+	}
+	result, err := c.ConvertRequest(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := result.(*OpenAIResponsesRequest)
+
+	if out.Reasoning == nil {
+		t.Fatal("expected Reasoning to be set")
+	}
+	if out.Reasoning.Effort != OpenAIReasoningEffortNone {
+		t.Errorf("expected effort=none, got %q", out.Reasoning.Effort)
+	}
+}
+
+func TestOpenAIToResponses_NoReasoningEffort(t *testing.T) {
+	c := &openaiToResponsesConverter{}
+	result, err := c.ConvertRequest(&OpenAIChatRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := result.(*OpenAIResponsesRequest)
+
+	if out.Reasoning != nil {
+		t.Error("expected no Reasoning when reasoning_effort not set")
 	}
 }
 

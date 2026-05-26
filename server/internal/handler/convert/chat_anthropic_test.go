@@ -132,6 +132,133 @@ func TestOpenAIToAnthropic_MaxTokensMissing(t *testing.T) {
 	}
 }
 
+func TestOpenAIToAnthropic_ReasoningEffortHigh(t *testing.T) {
+	c := &openaiToAnthropicConverter{}
+	effort := OpenAIReasoningEffortHigh
+	req := &OpenAIChatRequest{
+		ReasoningEffort: &effort,
+		MaxTokens:       intPtr(8192),
+	}
+	result, err := c.ConvertRequest(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := result.(*AnthropicRequest)
+
+	if out.Thinking == nil {
+		t.Fatal("expected Thinking to be set")
+	}
+	if out.Thinking.Type != AnthropicThinkingEnabled {
+		t.Errorf("expected thinking type=enabled, got %q", out.Thinking.Type)
+	}
+	if out.Thinking.BudgetTokens < 1024 {
+		t.Errorf("expected budget_tokens >= 1024, got %d", out.Thinking.BudgetTokens)
+	}
+	if out.OutputConfig == nil {
+		t.Fatal("expected OutputConfig to be set")
+	}
+	if out.OutputConfig.Effort != "high" {
+		t.Errorf("expected effort=high, got %q", out.OutputConfig.Effort)
+	}
+}
+
+func TestOpenAIToAnthropic_ReasoningEffortNone(t *testing.T) {
+	c := &openaiToAnthropicConverter{}
+	effort := OpenAIReasoningEffortNone
+	req := &OpenAIChatRequest{
+		ReasoningEffort: &effort,
+	}
+	result, err := c.ConvertRequest(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := result.(*AnthropicRequest)
+
+	if out.Thinking == nil {
+		t.Fatal("expected Thinking to be set")
+	}
+	if out.Thinking.Type != AnthropicThinkingDisabled {
+		t.Errorf("expected thinking type=disabled, got %q", out.Thinking.Type)
+	}
+	if out.OutputConfig != nil {
+		t.Error("expected no OutputConfig for reasoning_effort=none")
+	}
+}
+
+func TestOpenAIToAnthropic_ReasoningEffortXHigh(t *testing.T) {
+	c := &openaiToAnthropicConverter{}
+	effort := OpenAIReasoningEffortXHigh
+	req := &OpenAIChatRequest{
+		ReasoningEffort: &effort,
+	}
+	result, err := c.ConvertRequest(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := result.(*AnthropicRequest)
+
+	if out.OutputConfig == nil {
+		t.Fatal("expected OutputConfig to be set")
+	}
+	if out.OutputConfig.Effort != "max" {
+		t.Errorf("expected effort=max (xhigh→max), got %q", out.OutputConfig.Effort)
+	}
+}
+
+func TestOpenAIToAnthropic_ReasoningEffortNotSet(t *testing.T) {
+	c := &openaiToAnthropicConverter{}
+	req := &OpenAIChatRequest{}
+	result, err := c.ConvertRequest(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := result.(*AnthropicRequest)
+
+	if out.Thinking != nil {
+		t.Error("expected no Thinking when reasoning_effort is not set")
+	}
+	if out.OutputConfig != nil {
+		t.Error("expected no OutputConfig when reasoning_effort is not set")
+	}
+}
+
+func TestOpenAIToAnthropic_ReasoningEffortBudgetFromMaxTokens(t *testing.T) {
+	c := &openaiToAnthropicConverter{}
+	effort := OpenAIReasoningEffortHigh
+	req := &OpenAIChatRequest{
+		ReasoningEffort: &effort,
+		MaxTokens:       intPtr(2000),
+	}
+	result, err := c.ConvertRequest(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := result.(*AnthropicRequest)
+
+	if out.Thinking.BudgetTokens < 1000 || out.Thinking.BudgetTokens > 1100 {
+		t.Errorf("expected budget_tokens ~1000 (50%% of 2000), got %d", out.Thinking.BudgetTokens)
+	}
+}
+
+func TestOpenAIToAnthropic_ReasoningEffortBudgetFromMaxCompletionTokens(t *testing.T) {
+	c := &openaiToAnthropicConverter{}
+	effort := OpenAIReasoningEffortHigh
+	req := &OpenAIChatRequest{
+		ReasoningEffort:     &effort,
+		MaxCompletionTokens: intPtr(2000),
+		MaxTokens:           intPtr(4000),
+	}
+	result, err := c.ConvertRequest(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := result.(*AnthropicRequest)
+
+	if out.Thinking.BudgetTokens < 1550 || out.Thinking.BudgetTokens > 1650 {
+		t.Errorf("expected budget_tokens ~1600 (80%% of 2000 from MaxCompletionTokens), got %d", out.Thinking.BudgetTokens)
+	}
+}
+
 func TestOpenAIToAnthropic_PassthroughFields(t *testing.T) {
 	temp := 0.7
 	topP := 0.9
@@ -241,6 +368,89 @@ func TestOpenAIToAnthropic_ConvertResponse_EmptyContent(t *testing.T) {
 	}
 }
 
+func TestOpenAIToAnthropic_ConvertResponse_ThinkingContent(t *testing.T) {
+	c := &openaiToAnthropicConverter{}
+	body := []byte(`{
+		"id": "msg_01",
+		"type": "message",
+		"role": "assistant",
+		"model": "claude-3",
+		"content": [
+			{"type": "thinking", "thinking": "I need to reason step by step..."},
+			{"type": "text", "text": "Here is the answer."}
+		],
+		"stop_reason": "end_turn"
+	}`)
+	out, err := c.ConvertResponse(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var o OpenAIChatResponse
+	json.Unmarshal(out, &o)
+
+	if defaultString(o.Choices[0].Message.ReasoningContent, "") != "I need to reason step by step..." {
+		t.Errorf("expected reasoning_content, got %v", o.Choices[0].Message.ReasoningContent)
+	}
+	if defaultString(o.Choices[0].Message.Content, "") != "Here is the answer." {
+		t.Errorf("expected content='Here is the answer.', got %v", o.Choices[0].Message.Content)
+	}
+}
+
+func TestOpenAIToAnthropic_ConvertResponse_ThinkingOnly(t *testing.T) {
+	c := &openaiToAnthropicConverter{}
+	body := []byte(`{
+		"id": "msg_01",
+		"type": "message",
+		"role": "assistant",
+		"model": "claude-3",
+		"content": [
+			{"type": "thinking", "thinking": "Just thinking"}
+		],
+		"stop_reason": "end_turn"
+	}`)
+	out, err := c.ConvertResponse(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var o OpenAIChatResponse
+	json.Unmarshal(out, &o)
+
+	if defaultString(o.Choices[0].Message.ReasoningContent, "") != "Just thinking" {
+		t.Errorf("expected reasoning_content='Just thinking', got %v", o.Choices[0].Message.ReasoningContent)
+	}
+	if defaultString(o.Choices[0].Message.Content, "") != "" {
+		t.Error("expected empty content when only thinking block present")
+	}
+}
+
+func TestOpenAIToAnthropic_ConvertResponse_RedactedThinking(t *testing.T) {
+	c := &openaiToAnthropicConverter{}
+	body := []byte(`{
+		"id": "msg_01",
+		"type": "message",
+		"role": "assistant",
+		"model": "claude-3",
+		"content": [
+			{"type": "redacted_thinking", "data": "encrypted_data_here"},
+			{"type": "text", "text": "Final answer"}
+		],
+		"stop_reason": "end_turn"
+	}`)
+	out, err := c.ConvertResponse(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var o OpenAIChatResponse
+	json.Unmarshal(out, &o)
+
+	if o.Choices[0].Message.ReasoningContent != nil {
+		t.Error("expected no reasoning_content for redacted_thinking")
+	}
+	if defaultString(o.Choices[0].Message.Content, "") != "Final answer" {
+		t.Errorf("expected content='Final answer', got %v", o.Choices[0].Message.Content)
+	}
+}
+
 // ============================================================
 // anthropicToOpenAIConverter — ConvertRequest
 // ============================================================
@@ -286,6 +496,107 @@ func TestAnthropicToOpenAI_NoSystem(t *testing.T) {
 
 	if len(out.Messages) != 1 {
 		t.Errorf("expected 1 message, got %d", len(out.Messages))
+	}
+}
+
+func TestAnthropicToOpenAI_ThinkingEnabled(t *testing.T) {
+	c := &anthropicToOpenAIConverter{}
+	req := &AnthropicRequest{
+		Thinking: &AnthropicThinkingConfigParam{
+			Type:         AnthropicThinkingEnabled,
+			BudgetTokens: 4096,
+		},
+	}
+	result, err := c.ConvertRequest(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := result.(*OpenAIChatRequest)
+
+	if out.ReasoningEffort == nil {
+		t.Fatal("expected ReasoningEffort to be set")
+	}
+	if *out.ReasoningEffort != OpenAIReasoningEffortHigh {
+		t.Errorf("expected reasoning_effort=high, got %q", *out.ReasoningEffort)
+	}
+}
+
+func TestAnthropicToOpenAI_ThinkingDisabled(t *testing.T) {
+	c := &anthropicToOpenAIConverter{}
+	req := &AnthropicRequest{
+		Thinking: &AnthropicThinkingConfigParam{
+			Type: AnthropicThinkingDisabled,
+		},
+	}
+	result, err := c.ConvertRequest(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := result.(*OpenAIChatRequest)
+
+	if out.ReasoningEffort == nil {
+		t.Fatal("expected ReasoningEffort to be set")
+	}
+	if *out.ReasoningEffort != OpenAIReasoningEffortNone {
+		t.Errorf("expected reasoning_effort=none, got %q", *out.ReasoningEffort)
+	}
+}
+
+func TestAnthropicToOpenAI_OutputConfigEffort(t *testing.T) {
+	c := &anthropicToOpenAIConverter{}
+	req := &AnthropicRequest{
+		OutputConfig: &AnthropicOutputConfig{
+			Effort: "max",
+		},
+	}
+	result, err := c.ConvertRequest(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := result.(*OpenAIChatRequest)
+
+	if out.ReasoningEffort == nil {
+		t.Fatal("expected ReasoningEffort to be set")
+	}
+	if *out.ReasoningEffort != OpenAIReasoningEffortXHigh {
+		t.Errorf("expected reasoning_effort=xhigh (max→xhigh), got %q", *out.ReasoningEffort)
+	}
+}
+
+func TestAnthropicToOpenAI_OutputConfigOverridesThinking(t *testing.T) {
+	c := &anthropicToOpenAIConverter{}
+	req := &AnthropicRequest{
+		Thinking: &AnthropicThinkingConfigParam{
+			Type: AnthropicThinkingDisabled,
+		},
+		OutputConfig: &AnthropicOutputConfig{
+			Effort: "high",
+		},
+	}
+	result, err := c.ConvertRequest(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := result.(*OpenAIChatRequest)
+
+	if out.ReasoningEffort == nil {
+		t.Fatal("expected ReasoningEffort to be set (OutputConfig overrides Thinking)")
+	}
+	if *out.ReasoningEffort != OpenAIReasoningEffortHigh {
+		t.Errorf("expected reasoning_effort=high from OutputConfig, got %q", *out.ReasoningEffort)
+	}
+}
+
+func TestAnthropicToOpenAI_NoThinking(t *testing.T) {
+	c := &anthropicToOpenAIConverter{}
+	result, err := c.ConvertRequest(&AnthropicRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := result.(*OpenAIChatRequest)
+
+	if out.ReasoningEffort != nil {
+		t.Error("expected no ReasoningEffort when Thinking/OutputConfig not set")
 	}
 }
 
@@ -390,6 +701,100 @@ func TestAnthropicToOpenAI_ConvertResponse_MissingUsage(t *testing.T) {
 	}
 }
 
+func TestAnthropicToOpenAI_ConvertResponse_ReasoningContent(t *testing.T) {
+	c := &anthropicToOpenAIConverter{}
+	body := []byte(`{
+		"choices": [{
+			"index": 0,
+			"message": {
+				"role": "assistant",
+				"content": "Final answer",
+				"reasoning_content": "Step by step thinking..."
+			},
+			"finish_reason": "stop"
+		}]
+	}`)
+	out, err := c.ConvertResponse(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var a AnthropicResponse
+	json.Unmarshal(out, &a)
+
+	if len(a.Content) != 2 {
+		t.Fatalf("expected 2 content blocks (thinking + text), got %d", len(a.Content))
+	}
+	if a.Content[0].Type != AnthropicContentTypeThinking {
+		t.Errorf("expected first block type=thinking, got %q", a.Content[0].Type)
+	}
+	if a.Content[0].Thinking != "Step by step thinking..." {
+		t.Errorf("expected thinking='Step by step thinking...', got %q", a.Content[0].Thinking)
+	}
+	if a.Content[1].Type != AnthropicContentTypeText {
+		t.Errorf("expected second block type=text, got %q", a.Content[1].Type)
+	}
+	if a.Content[1].Text != "Final answer" {
+		t.Errorf("expected text='Final answer', got %q", a.Content[1].Text)
+	}
+}
+
+func TestAnthropicToOpenAI_ConvertResponse_ReasoningOnly(t *testing.T) {
+	c := &anthropicToOpenAIConverter{}
+	body := []byte(`{
+		"choices": [{
+			"index": 0,
+			"message": {
+				"role": "assistant",
+				"reasoning_content": "Just thinking"
+			},
+			"finish_reason": "stop"
+		}]
+	}`)
+	out, err := c.ConvertResponse(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var a AnthropicResponse
+	json.Unmarshal(out, &a)
+
+	if len(a.Content) != 1 {
+		t.Fatalf("expected 1 content block (thinking only), got %d", len(a.Content))
+	}
+	if a.Content[0].Type != AnthropicContentTypeThinking {
+		t.Errorf("expected block type=thinking, got %q", a.Content[0].Type)
+	}
+	if a.Content[0].Text != "" {
+		t.Error("expected no text in thinking-only response")
+	}
+}
+
+func TestAnthropicToOpenAI_ConvertResponse_NoReasoning(t *testing.T) {
+	c := &anthropicToOpenAIConverter{}
+	body := []byte(`{
+		"choices": [{
+			"index": 0,
+			"message": {"role": "assistant", "content": "Just text"},
+			"finish_reason": "stop"
+		}]
+	}`)
+	out, err := c.ConvertResponse(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var a AnthropicResponse
+	json.Unmarshal(out, &a)
+
+	if len(a.Content) != 1 {
+		t.Fatalf("expected 1 content block (text only), got %d", len(a.Content))
+	}
+	if a.Content[0].Type != AnthropicContentTypeText {
+		t.Errorf("expected block type=text, got %q", a.Content[0].Type)
+	}
+	if a.Content[0].Text != "Just text" {
+		t.Errorf("expected text='Just text', got %q", a.Content[0].Text)
+	}
+}
+
 // ============================================================
 // SSE: Anthropic SSE → OpenAI SSE
 // ============================================================
@@ -427,6 +832,62 @@ func TestConvertSSE_AnthropicToOpenAI_PingIgnored(t *testing.T) {
 	result, _ := io.ReadAll(reader)
 	if len(result) > 0 {
 		t.Errorf("expected empty, got %q", string(result))
+	}
+}
+
+func TestConvertSSE_AnthropicToOpenAI_ThinkingDelta(t *testing.T) {
+	c := &openaiToAnthropicConverter{}
+	input := "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"model\":\"claude-3\"}}\n\n" +
+		"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"I'm thinking step by\"}}\n\n" +
+		"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\" step...\"}}\n\n" +
+		"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"Here is the answer.\"}}\n\n" +
+		"event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"}}\n\n" +
+		"event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"
+
+	reader := c.ConvertSSE(io.NopCloser(strings.NewReader(input)))
+	result, _ := io.ReadAll(reader)
+	resultStr := string(result)
+
+	// Each thinking delta is a separate SSE chunk, so we check for individual pieces
+	if !strings.Contains(resultStr, `"reasoning_content":"I'm thinking step by"`) {
+		t.Errorf("expected first reasoning_content delta, got %s", resultStr)
+	}
+	if !strings.Contains(resultStr, `"reasoning_content":" step..."`) {
+		t.Errorf("expected second reasoning_content delta, got %s", resultStr)
+	}
+	if !strings.Contains(resultStr, `"content":"Here is the answer."`) {
+		t.Error("expected content text delta")
+	}
+}
+
+func TestConvertSSE_AnthropicToOpenAI_ThinkingDeltaOnly(t *testing.T) {
+	c := &openaiToAnthropicConverter{}
+	input := "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"m1\",\"model\":\"c3\"}}\n\n" +
+		"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"Just thinking\"}}\n\n" +
+		"event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"}}\n\n" +
+		"event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"
+
+	reader := c.ConvertSSE(io.NopCloser(strings.NewReader(input)))
+	result, _ := io.ReadAll(reader)
+	resultStr := string(result)
+
+	if !strings.Contains(resultStr, `"reasoning_content":"Just thinking"`) {
+		t.Errorf("expected reasoning_content, got %s", resultStr)
+	}
+}
+
+func TestConvertSSE_AnthropicToOpenAI_EmptyThinkingDeltaSkipped(t *testing.T) {
+	c := &openaiToAnthropicConverter{}
+	input := "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"m1\",\"model\":\"c3\"}}\n\n" +
+		"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"\"}}\n\n" +
+		"event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"
+
+	reader := c.ConvertSSE(io.NopCloser(strings.NewReader(input)))
+	result, _ := io.ReadAll(reader)
+	resultStr := string(result)
+
+	if strings.Contains(resultStr, `"reasoning_content"`) {
+		t.Error("expected no reasoning_content for empty thinking delta")
 	}
 }
 
@@ -482,6 +943,55 @@ func TestConvertSSE_OpenAIToAnthropic(t *testing.T) {
 	}
 	if !strings.Contains(resultStr, `"stop_reason":"end_turn"`) {
 		t.Error("expected end_turn stop_reason")
+	}
+}
+
+func TestConvertSSE_OpenAIToAnthropic_ReasoningContent(t *testing.T) {
+	c := &anthropicToOpenAIConverter{}
+	input := `data: {"id":"chat-1","model":"gpt-4","choices":[{"delta":{"role":"assistant"}}]}` + "\n\n" +
+		`data: {"choices":[{"delta":{"reasoning_content":"Thinking step by"}}]}` + "\n\n" +
+		`data: {"choices":[{"delta":{"reasoning_content":" step..."}}]}` + "\n\n" +
+		`data: {"choices":[{"delta":{"content":"Here is the answer."}}]}` + "\n\n" +
+		`data: {"choices":[{"delta":{},"finish_reason":"stop"}]}` + "\n\n" +
+		`data: [DONE]` + "\n\n"
+
+	reader := c.ConvertSSE(io.NopCloser(strings.NewReader(input)))
+	result, _ := io.ReadAll(reader)
+	resultStr := string(result)
+
+	if !strings.Contains(resultStr, `"type":"thinking_delta"`) {
+		t.Errorf("expected thinking_delta type, got %s", resultStr)
+	}
+	if !strings.Contains(resultStr, `"thinking":"Thinking step by"`) {
+		t.Errorf("expected first thinking delta, got %s", resultStr)
+	}
+	if !strings.Contains(resultStr, `"thinking":" step..."`) {
+		t.Errorf("expected second thinking delta, got %s", resultStr)
+	}
+	if !strings.Contains(resultStr, `"type":"text_delta"`) {
+		t.Errorf("expected text_delta type, got %s", resultStr)
+	}
+	if !strings.Contains(resultStr, `"text":"Here is the answer."`) {
+		t.Errorf("expected text delta, got %s", resultStr)
+	}
+}
+
+func TestConvertSSE_OpenAIToAnthropic_ReasoningWithoutContent(t *testing.T) {
+	c := &anthropicToOpenAIConverter{}
+	input := `data: {"id":"chat-1","choices":[{"delta":{"role":"assistant"}}]}` + "\n\n" +
+		`data: {"choices":[{"delta":{"reasoning_content":"Only thinking"}}]}` + "\n\n" +
+		`data: {"choices":[{"delta":{},"finish_reason":"stop"}]}` + "\n\n" +
+		`data: [DONE]` + "\n\n"
+
+	reader := c.ConvertSSE(io.NopCloser(strings.NewReader(input)))
+	result, _ := io.ReadAll(reader)
+	resultStr := string(result)
+
+	if !strings.Contains(resultStr, `"type":"thinking_delta"`) {
+		t.Errorf("expected thinking_delta, got %s", resultStr)
+	}
+	if strings.Contains(resultStr, `"type":"text_delta"`) {
+		t.Error("expected no text_delta when only reasoning_content is present")
 	}
 }
 

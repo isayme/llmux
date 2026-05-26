@@ -23,6 +23,12 @@ func (c *openaiToResponsesConverter) ConvertRequest(req any) (any, error) {
 		respReq.MaxOutputTokens = oaiReq.MaxTokens
 	}
 
+	if oaiReq.ReasoningEffort != nil {
+		respReq.Reasoning = &OpenAIReasoning{
+			Effort: *oaiReq.ReasoningEffort,
+		}
+	}
+
 	var input []interface{}
 	var instructions []string
 
@@ -56,7 +62,6 @@ func (c *openaiToResponsesConverter) ConvertRequest(req any) (any, error) {
 	//   Store → OpenAIResponsesRequest.Store
 	//   Metadata → OpenAIResponsesRequest.Metadata
 	//   Tools/ToolChoice → OpenAIResponsesRequest.Tools/ToolChoice
-	//   ReasoningEffort → OpenAIResponsesRequest.Reasoning
 	//   ResponseFormat → OpenAIResponsesRequest.Text
 	//   FrequencyPenalty, PresencePenalty → both have equivalents
 	//   ServiceTier → OpenAIResponsesRequest.ServiceTier
