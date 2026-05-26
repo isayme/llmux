@@ -30,6 +30,9 @@ jobs:
 
       - name: Build
         run: mkdir -p dist && go build -o ./dist/requestbin main.go
+      
+      - name: Test
+        run: go test -v ./...
   
   build-web:
     runs-on: ubuntu-latest
