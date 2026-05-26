@@ -43,6 +43,40 @@ LLMux 是一个 LLM 代理服务，主要功能：
 - `openai`：转发到 `/v1/chat/completions`
 - `anthropic`：转发到 `/anthropic/v1/messages`
 
+### 协议转换 (convert 包)
+`server/internal/handler/convert/` 负责三个协议间的互转：**OpenAI Chat**、**OpenAI Responses**、**Anthropic**。
+
+#### 转换器接口
+- `ProtocolConverter` 定义三个方法：`ConvertRequest`、`ConvertResponse`、`ConvertSSE`
+- 每个转换方向一个文件，命名规则：`{源协议}_to_{目标协议}.go`
+- 工厂函数 `NewConverter` 在 `convert.go` 中，根据源/目标协议类型返回对应转换器
+
+#### 类型定义约定
+- 类型名 = 协议前缀(`OpenAI`/`Anthropic`) + SDK 接口名（如 `OpenAIChatCompletionRequest`）
+- 每个字段必须有 `//` 注释说明用途，已废弃字段标注 `// Deprecated:`
+- JSON tag 保持与 wire format 一致（snake_case）
+- 动态类型字段（如 `messages[].content`）使用 `interface{}`
+- 旧类型名通过 type alias 向后兼容（如 `OpenAIChatRequest` = `OpenAIChatCompletionRequest`）
+
+#### 当前转换覆盖情况
+- 基础字段（model/messages/temperature/top_p/stream/stop）已覆盖
+- **以下字段已有等价物但尚未实现转换**（标注在转换函数的注释中）：
+  - Tools/ToolChoice：三个协议都支持，结构不同
+  - Metadata：三个协议都支持，类型不同
+  - ReasoningEffort ↔ Thinking：Chat ↔ Anthropic
+  - ResponseFormat ↔ OutputConfig：Chat ↔ Anthropic
+  - ResponseFormat ↔ Text：Chat ↔ Responses
+  - Reasonning ↔ Reasoning：Responses ↔ Chat
+  - 以及 Temperature/Stream/Store/ServiceTier/PresencePenalty/FrequencyPenalty/TopLogprobs/PromptCache 等公共参数
+- 响应转换仅处理首个 text content block，tool_use/thinking 等复杂 block 未转换
+
+#### 测试
+```bash
+cd server && go test ./internal/handler/convert/... -count=1
+```
+- 覆盖 ConvertRequest/ConvertResponse/ConvertSSE 三个方向
+- 测试数据直接构造 struct 或使用 JSON body
+
 ## 开发注意事项
 
 ### 后端修改
