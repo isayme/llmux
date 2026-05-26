@@ -2,113 +2,93 @@ package convert
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"strings"
 )
 
 type openaiToResponsesConverter struct{}
 
-func (c *openaiToResponsesConverter) ConvertRequest(req map[string]interface{}) map[string]interface{} {
-	out := copyMap(req,
-		"messages",
-		"max_tokens",
-	)
-
-	if v, ok := req["max_tokens"]; ok {
-		out["max_output_tokens"] = v
+func (c *openaiToResponsesConverter) ConvertRequest(req any) (any, error) {
+	oaiReq, ok := req.(*OpenAIChatRequest)
+	if !ok {
+		return nil, errors.New("expected *OpenAIChatRequest")
 	}
 
-	messages, _ := req["messages"].([]interface{})
+	respReq := &OpenAIResponsesRequest{
+		Model: oaiReq.Model,
+	}
+
+	if oaiReq.MaxTokens != nil {
+		respReq.MaxOutputTokens = oaiReq.MaxTokens
+	}
 
 	var input []interface{}
 	var instructions []string
 
-	for _, m := range messages {
-		msg, ok := m.(map[string]interface{})
-		if !ok {
-			continue
-		}
-		role, _ := msg["role"].(string)
-		if role == "system" {
-			if content, ok := msg["content"].(string); ok && content != "" {
-				instructions = append(instructions, content)
+	for _, m := range oaiReq.Messages {
+		if m.Role == OpenAIRoleSystem {
+			switch c := m.Content.(type) {
+			case string:
+				if c != "" {
+					instructions = append(instructions, c)
+				}
 			}
 			continue
 		}
-		input = append(input, map[string]interface{}{
-			"type":    "message",
-			"role":    role,
-			"content": msg["content"],
+		input = append(input, ResponsesInputItem{
+			Type:    ResponsesItemTypeMessage,
+			Role:    m.Role,
+			Content: m.Content,
 		})
 	}
 
-	out["input"] = input
+	respReq.Input = input
 	if len(instructions) > 0 {
-		out["instructions"] = strings.Join(instructions, "\n\n")
+		respReq.Instructions = strings.Join(instructions, "\n\n")
 	}
 
-	return out
+	return respReq, nil
 }
 
 func (c *openaiToResponsesConverter) ConvertResponse(body []byte) ([]byte, error) {
-	var resp map[string]interface{}
-	if err := json.Unmarshal(body, &resp); err != nil {
+	var oaiResp OpenAIChatResponse
+	if err := json.Unmarshal(body, &oaiResp); err != nil {
 		return nil, err
 	}
 
-	out := copyMap(resp,
-		"object",
-		"choices",
-		"created",
-		"usage",
-	)
-
-	out["object"] = "response"
-
-	if created, ok := resp["created"]; ok {
-		out["created_at"] = created
+	respResp := OpenAIResponsesResponse{
+		ID:     oaiResp.ID,
+		Object: ResponsesObject,
+		Model:  oaiResp.Model,
 	}
 
-	choices, _ := resp["choices"].([]interface{})
-	if len(choices) > 0 {
-		choice, ok := choices[0].(map[string]interface{})
-		if !ok {
-			return json.Marshal(out)
-		}
+	respResp.CreatedAt = oaiResp.Created
 
-		msg, _ := choice["message"].(map[string]interface{})
-		if msg == nil {
-			return json.Marshal(out)
-		}
-
-		role, _ := msg["role"].(string)
-		content, _ := msg["content"].(string)
-
-		output := []interface{}{
-			map[string]interface{}{
-				"type": "message",
-				"id":   resp["id"],
-				"role": role,
-				"content": []interface{}{
-					map[string]interface{}{
-						"type": "output_text",
-						"text": content,
-					},
+	content := extractChatContent(oaiResp.Choices)
+	respResp.Output = []ResponsesOutputItem{
+		{
+			Type: ResponsesItemTypeMessage,
+			ID:   oaiResp.ID,
+			Role: OpenAIRoleAssistant,
+			Content: []ResponsesContentBlock{
+				{
+					Type: ResponsesContentTypeText,
+					Text: content,
 				},
 			},
-		}
-		out["output"] = output
+		},
 	}
 
-	if u, ok := resp["usage"].(map[string]interface{}); ok {
-		out["usage"] = map[string]interface{}{
-			"input_tokens":  toFloat64(u["prompt_tokens"]),
-			"output_tokens": toFloat64(u["completion_tokens"]),
-			"total_tokens":  toFloat64(u["total_tokens"]),
+	if oaiResp.Usage != nil {
+		respResp.Usage = &ResponsesUsage{
+			InputTokens:  oaiResp.Usage.PromptTokens,
+			OutputTokens: oaiResp.Usage.CompletionTokens,
+			TotalTokens:  oaiResp.Usage.TotalTokens,
 		}
 	}
 
-	return json.Marshal(out)
+	return json.Marshal(respResp)
 }
 
 func (c *openaiToResponsesConverter) ConvertSSE(r io.ReadCloser) io.ReadCloser {
@@ -135,94 +115,85 @@ func (c *openaiToResponsesConverter) ConvertSSE(r io.ReadCloser) io.ReadCloser {
 					continue
 				}
 
-				if event.Data == "[DONE]" {
+				if event.Data == SSEDoneMarker {
 					if hadContent {
-						writeSSEJSON(pw, "response.text.done", map[string]interface{}{
-							"type": "response.text.done",
-							"text": "",
+						writeSSEJSON(pw, ResponsesSSETextDone, OpenAIResponsesStreamEvent{
+							Type: ResponsesSSETextDone,
 						})
-						writeSSEJSON(pw, "response.output_item.done", map[string]interface{}{
-							"type": "response.output_item.done",
+						writeSSEJSON(pw, ResponsesSSEOutputItemDone, OpenAIResponsesStreamEvent{
+							Type: ResponsesSSEOutputItemDone,
 						})
 					}
-					writeSSEJSON(pw, "response.done", map[string]interface{}{
-						"type": "response.done",
-						"response": map[string]interface{}{
-							"id":    responseID,
-							"model": responseModel,
+					writeSSEJSON(pw, ResponsesSSEDone, OpenAIResponsesStreamEvent{
+						Type: ResponsesSSEDone,
+						Response: &OpenAIResponsesStreamSummary{
+							ID:    responseID,
+							Model: responseModel,
 						},
 					})
 					continue
 				}
 
-				var chunk map[string]interface{}
+				var chunk OpenAIChatStreamChunk
 				if err := json.Unmarshal([]byte(event.Data), &chunk); err != nil {
 					continue
 				}
 
-				choices, _ := chunk["choices"].([]interface{})
-				if len(choices) == 0 {
-					continue
-				}
-				choice, ok := choices[0].(map[string]interface{})
-				if !ok {
+				if len(chunk.Choices) == 0 {
 					continue
 				}
 
 				if !started {
 					started = true
-					responseID, _ = chunk["id"].(string)
-					responseModel, _ = chunk["model"].(string)
+					responseID = chunk.ID
+					responseModel = chunk.Model
 
-					writeSSEJSON(pw, "response.created", map[string]interface{}{
-						"type": "response.created",
-						"response": map[string]interface{}{
-							"id":    responseID,
-							"model": responseModel,
+					writeSSEJSON(pw, ResponsesSSECreated, OpenAIResponsesStreamEvent{
+						Type: ResponsesSSECreated,
+						Response: &OpenAIResponsesStreamSummary{
+							ID:    responseID,
+							Model: responseModel,
 						},
 					})
-					writeSSEJSON(pw, "response.output_item.added", map[string]interface{}{
-						"type": "response.output_item.added",
-						"item": map[string]interface{}{
-							"type": "message",
-							"role": "assistant",
+					writeSSEJSON(pw, ResponsesSSEOutputItemAdded, OpenAIResponsesStreamEvent{
+						Type: ResponsesSSEOutputItemAdded,
+						Item: &ResponsesOutputItem{
+							Type: ResponsesItemTypeMessage,
+							Role: OpenAIRoleAssistant,
 						},
 					})
-					writeSSEJSON(pw, "response.content_part.added", map[string]interface{}{
-						"type": "response.content_part.added",
-						"part": map[string]interface{}{
-							"type": "text",
+					writeSSEJSON(pw, ResponsesSSEContentPartAdded, OpenAIResponsesStreamEvent{
+						Type: ResponsesSSEContentPartAdded,
+						Part: &ResponsesContentBlock{
+							Type: AnthropicContentTypeText,
 						},
 					})
 				}
 
-				delta, _ := choice["delta"].(map[string]interface{})
-				if delta != nil {
-					if content, ok := delta["content"].(string); ok && content != "" {
-						hadContent = true
-						writeSSEJSON(pw, "response.text.delta", map[string]interface{}{
-							"type":  "response.text.delta",
-							"delta": content,
-						})
-					}
+				delta := chunk.Choices[0].Delta
+				if delta.Content != "" {
+					hadContent = true
+					writeSSEJSON(pw, ResponsesSSETextDelta, OpenAIResponsesStreamEvent{
+						Type:  ResponsesSSETextDelta,
+						Delta: delta.Content,
+					})
 				}
 
-				finishReason, _ := choice["finish_reason"].(string)
+				finishReason := chunk.Choices[0].FinishReason
 				if finishReason != "" {
 					if hadContent {
-						writeSSEJSON(pw, "response.text.done", map[string]interface{}{
-							"type": "response.text.done",
-							"text": "",
+						writeSSEJSON(pw, ResponsesSSETextDone, OpenAIResponsesStreamEvent{
+							Type: ResponsesSSETextDone,
 						})
 					}
-					writeSSEJSON(pw, "response.output_item.done", map[string]interface{}{
-						"type": "response.output_item.done",
+					writeSSEJSON(pw, ResponsesSSEOutputItemDone, OpenAIResponsesStreamEvent{
+						Type: ResponsesSSEOutputItemDone,
 					})
-					writeSSEJSON(pw, "response.done", map[string]interface{}{
-						"type": "response.done",
-						"response": map[string]interface{}{
-							"id":    responseID,
-							"model": responseModel,
+					writeSSEJSON(pw, ResponsesSSEDone, OpenAIResponsesStreamEvent{
+						Type: ResponsesSSEDone,
+						Response: &OpenAIResponsesStreamSummary{
+							ID:    responseID,
+							Model: responseModel,
 						},
 					})
 				}

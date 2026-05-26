@@ -2,111 +2,95 @@ package convert
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
+	"strings"
 )
 
 type anthropicToResponsesConverter struct{}
 
-func (c *anthropicToResponsesConverter) ConvertRequest(req map[string]interface{}) map[string]interface{} {
-	out := copyMap(req,
-		"messages",
-		"system",
-		"max_tokens",
-	)
-
-	if v, ok := req["max_tokens"]; ok {
-		out["max_output_tokens"] = v
+func (c *anthropicToResponsesConverter) ConvertRequest(req any) (any, error) {
+	anthReq, ok := req.(*AnthropicRequest)
+	if !ok {
+		return nil, errors.New("expected *AnthropicRequest")
 	}
 
-	messages, _ := req["messages"].([]interface{})
+	respReq := &OpenAIResponsesRequest{
+		Model: anthReq.Model,
+	}
+
+	if anthReq.MaxTokens > 0 {
+		respReq.MaxOutputTokens = &anthReq.MaxTokens
+	}
+
 	var input []interface{}
-	for _, m := range messages {
-		if msg, ok := m.(map[string]interface{}); ok {
-			input = append(input, map[string]interface{}{
-				"type":    "message",
-				"role":    msg["role"],
-				"content": msg["content"],
-			})
-		}
+	for _, m := range anthReq.Messages {
+		input = append(input, ResponsesInputItem{
+			Type:    ResponsesItemTypeMessage,
+			Role:    m.Role,
+			Content: m.Content,
+		})
 	}
-	out["input"] = input
+	respReq.Input = input
 
-	if system, ok := req["system"]; ok {
-		switch s := system.(type) {
-		case string:
-			if s != "" {
-				out["instructions"] = s
-			}
-		case []interface{}:
-			var texts []string
-			for _, block := range s {
-				if bm, ok := block.(map[string]interface{}); ok {
-					if text, ok := bm["text"].(string); ok && text != "" {
-						texts = append(texts, text)
+	if anthReq.System != "" {
+		respReq.Instructions = anthReq.System
+	} else if len(anthReq.Messages) > 0 && anthReq.Messages[0].Role == OpenAIRoleSystem {
+		var texts []string
+		for _, m := range anthReq.Messages {
+			if m.Role == OpenAIRoleSystem {
+				switch c := m.Content.(type) {
+				case string:
+					if c != "" {
+						texts = append(texts, c)
 					}
 				}
 			}
-			if len(texts) > 0 {
-				content := texts[0]
-				for i := 1; i < len(texts); i++ {
-					content += "\n\n" + texts[i]
-				}
-				out["instructions"] = content
-			}
+		}
+		if len(texts) > 0 {
+			respReq.Instructions = strings.Join(texts, "\n\n")
 		}
 	}
 
-	return out
+	return respReq, nil
 }
 
 func (c *anthropicToResponsesConverter) ConvertResponse(body []byte) ([]byte, error) {
-	var resp map[string]interface{}
-	if err := json.Unmarshal(body, &resp); err != nil {
+	var anthResp AnthropicResponse
+	if err := json.Unmarshal(body, &anthResp); err != nil {
 		return nil, err
 	}
 
-	out := copyMap(resp,
-		"type",
-		"content",
-		"role",
-	)
+	text := extractText(anthResp.Content)
 
-	out["object"] = "response"
-
-	role, _ := resp["role"].(string)
-	contentArr, _ := resp["content"].([]interface{})
-
-	var text string
-	if len(contentArr) > 0 {
-		if block, ok := contentArr[0].(map[string]interface{}); ok {
-			text, _ = block["text"].(string)
-		}
-	}
-
-	output := []interface{}{
-		map[string]interface{}{
-			"type": "message",
-			"id":   resp["id"],
-			"role": role,
-			"content": []interface{}{
-				map[string]interface{}{
-					"type": "output_text",
-					"text": text,
+	respResp := OpenAIResponsesResponse{
+		ID:     anthResp.ID,
+		Object: ResponsesObject,
+		Model:  anthResp.Model,
+		Output: []ResponsesOutputItem{
+			{
+				Type: ResponsesItemTypeMessage,
+				ID:   anthResp.ID,
+				Role: anthResp.Role,
+				Content: []ResponsesContentBlock{
+					{
+						Type: ResponsesContentTypeText,
+						Text: text,
+					},
 				},
 			},
 		},
 	}
-	out["output"] = output
 
-	if u, ok := resp["usage"].(map[string]interface{}); ok {
-		out["usage"] = map[string]interface{}{
-			"input_tokens":  toFloat64(u["input_tokens"]),
-			"output_tokens": toFloat64(u["output_tokens"]),
-			"total_tokens":  toFloat64(u["input_tokens"]) + toFloat64(u["output_tokens"]),
+	if anthResp.Usage != nil {
+		respResp.Usage = &ResponsesUsage{
+			InputTokens:  anthResp.Usage.InputTokens,
+			OutputTokens: anthResp.Usage.OutputTokens,
+			TotalTokens:  anthResp.Usage.InputTokens + anthResp.Usage.OutputTokens,
 		}
 	}
 
-	return json.Marshal(out)
+	return json.Marshal(respResp)
 }
 
 func (c *anthropicToResponsesConverter) ConvertSSE(r io.ReadCloser) io.ReadCloser {
@@ -131,34 +115,33 @@ func (c *anthropicToResponsesConverter) ConvertSSE(r io.ReadCloser) io.ReadClose
 					continue
 				}
 
-				var data map[string]interface{}
-				if err := json.Unmarshal([]byte(event.Data), &data); err != nil {
+				var evt AnthropicSSEEvent
+				if err := json.Unmarshal([]byte(event.Data), &evt); err != nil {
 					continue
 				}
 
 				switch event.Event {
 				case AnthropicSSEMessageStartEvent:
-					msg, _ := data["message"].(map[string]interface{})
-					if msg != nil {
-						responseID, _ = msg["id"].(string)
+					if evt.Message != nil {
+						responseID = evt.Message.ID
 					}
-					writeSSEJSON(pw, "response.created", map[string]interface{}{
-						"type": "response.created",
-						"response": map[string]interface{}{
-							"id": responseID,
+					writeSSEJSON(pw, ResponsesSSECreated, OpenAIResponsesStreamEvent{
+						Type: ResponsesSSECreated,
+						Response: &OpenAIResponsesStreamSummary{
+							ID: responseID,
 						},
 					})
-					writeSSEJSON(pw, "response.output_item.added", map[string]interface{}{
-						"type": "response.output_item.added",
-						"item": map[string]interface{}{
-							"type": "message",
-							"role": "assistant",
+					writeSSEJSON(pw, ResponsesSSEOutputItemAdded, OpenAIResponsesStreamEvent{
+						Type: ResponsesSSEOutputItemAdded,
+						Item: &ResponsesOutputItem{
+							Type: ResponsesItemTypeMessage,
+							Role: AnthropicRoleAssistant,
 						},
 					})
-					writeSSEJSON(pw, "response.content_part.added", map[string]interface{}{
-						"type": "response.content_part.added",
-						"part": map[string]interface{}{
-							"type": "text",
+					writeSSEJSON(pw, ResponsesSSEContentPartAdded, OpenAIResponsesStreamEvent{
+						Type: ResponsesSSEContentPartAdded,
+						Part: &ResponsesContentBlock{
+							Type: AnthropicContentTypeText,
 						},
 					})
 					started = true
@@ -167,34 +150,27 @@ func (c *anthropicToResponsesConverter) ConvertSSE(r io.ReadCloser) io.ReadClose
 					if !started {
 						continue
 					}
-					delta, _ := data["delta"].(map[string]interface{})
-					if delta == nil {
+					if evt.Delta == nil || evt.Delta.Type != AnthropicDeltaTypeTextDelta {
 						continue
 					}
-					deltaType, _ := delta["type"].(string)
-					if deltaType != "text_delta" {
-						continue
-					}
-					text, _ := delta["text"].(string)
 
-					writeSSEJSON(pw, "response.text.delta", map[string]interface{}{
-						"type":  "response.text.delta",
-						"delta": text,
+					writeSSEJSON(pw, ResponsesSSETextDelta, OpenAIResponsesStreamEvent{
+						Type:  ResponsesSSETextDelta,
+						Delta: evt.Delta.Text,
 					})
 
 				case AnthropicSSEMessageStopEvent:
 					if started {
-						writeSSEJSON(pw, "response.text.done", map[string]interface{}{
-							"type": "response.text.done",
-							"text": "",
+						writeSSEJSON(pw, ResponsesSSETextDone, OpenAIResponsesStreamEvent{
+							Type: ResponsesSSETextDone,
 						})
-						writeSSEJSON(pw, "response.output_item.done", map[string]interface{}{
-							"type": "response.output_item.done",
+						writeSSEJSON(pw, ResponsesSSEOutputItemDone, OpenAIResponsesStreamEvent{
+							Type: ResponsesSSEOutputItemDone,
 						})
-						writeSSEJSON(pw, "response.done", map[string]interface{}{
-							"type": "response.done",
-							"response": map[string]interface{}{
-								"id": responseID,
+						writeSSEJSON(pw, ResponsesSSEDone, OpenAIResponsesStreamEvent{
+							Type: ResponsesSSEDone,
+							Response: &OpenAIResponsesStreamSummary{
+								ID: responseID,
 							},
 						})
 					}

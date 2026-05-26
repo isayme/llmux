@@ -2,198 +2,142 @@ package convert
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
+	"strings"
 	"time"
 )
 
-// openaiToAnthropicConverter converts OpenAI-format requests and Anthropic-format
-// responses so that an OpenAI client can communicate with an Anthropic provider.
 type openaiToAnthropicConverter struct{}
 
-// --- Request: OpenAI → Anthropic ---
-
-func (c *openaiToAnthropicConverter) ConvertRequest(req map[string]interface{}) map[string]interface{} {
-	out := copyMap(req,
-		"messages",   // extracted, system role removed
-		"stop",       // renamed to stop_sequences
-		"max_tokens", // required by Anthropic, defaults to 4096
-	)
-
-	out = c.extractSystemFromMessages(out, req)
-	out = c.convertStopToStopSequences(out, req)
-	out = c.ensureMaxTokens(out, req)
-	return out
-}
-
-// extractSystemFromMessages removes system-role messages from the messages array
-// and places their content into the Anthropic top-level "system" field.
-// OpenAI represents system prompts as messages with role="system"; Anthropic uses
-// a dedicated "system" field (string or content block array).
-func (c *openaiToAnthropicConverter) extractSystemFromMessages(out, req map[string]interface{}) map[string]interface{} {
-	messages, ok := req["messages"].([]interface{})
+func (c *openaiToAnthropicConverter) ConvertRequest(req any) (any, error) {
+	oaiReq, ok := req.(*OpenAIChatRequest)
 	if !ok {
-		return out
+		return nil, errors.New("expected *OpenAIChatRequest")
 	}
 
-	var nonSystem []interface{}
-	var systemContents []string
+	nonSystem, systemText := splitSystemMessages(oaiReq.Messages)
 
+	anthReq := &AnthropicRequest{
+		Model:     oaiReq.Model,
+		Messages:  toAnthropicMessages(nonSystem),
+		System:    systemText,
+		MaxTokens: defaultInt(oaiReq.MaxTokens, 4096),
+		Stream:    oaiReq.Stream,
+	}
+
+	if oaiReq.Temperature != nil {
+		anthReq.Temperature = oaiReq.Temperature
+	}
+	if oaiReq.TopP != nil {
+		anthReq.TopP = oaiReq.TopP
+	}
+	if len(oaiReq.Stop) > 0 {
+		anthReq.StopSequences = oaiReq.Stop
+	}
+
+	return anthReq, nil
+}
+
+func splitSystemMessages(messages []OpenAIChatMessage) (nonSystem []OpenAIChatMessage, systemText string) {
+	var texts []string
 	for _, m := range messages {
-		msg, ok := m.(map[string]interface{})
-		if !ok {
-			nonSystem = append(nonSystem, m)
-			continue
-		}
-		if role, _ := msg["role"].(string); role != "system" {
-			nonSystem = append(nonSystem, m)
-			continue
-		}
-		// Collect system message text from both string and content-block formats.
-		if content, _ := msg["content"].(string); content != "" {
-			systemContents = append(systemContents, content)
-		}
-		if content, ok := msg["content"].([]interface{}); ok {
-			for _, c := range content {
-				if cm, ok := c.(map[string]interface{}); ok {
-					if text, _ := cm["text"].(string); text != "" {
-						systemContents = append(systemContents, text)
+		if m.Role == OpenAIRoleSystem {
+			switch c := m.Content.(type) {
+			case string:
+				if c != "" {
+					texts = append(texts, c)
+				}
+			case []interface{}:
+				for _, block := range c {
+					if bm, ok := block.(map[string]interface{}); ok {
+						if text, ok := bm["text"].(string); ok && text != "" {
+							texts = append(texts, text)
+						}
 					}
 				}
 			}
+		} else {
+			nonSystem = append(nonSystem, m)
 		}
 	}
-
-	out["messages"] = nonSystem
-
-	if len(systemContents) > 0 {
-		systemStr := systemContents[0]
-		for i := 1; i < len(systemContents); i++ {
-			systemStr += "\n\n" + systemContents[i]
-		}
-		out["system"] = systemStr
+	if len(texts) > 0 {
+		systemText = strings.Join(texts, "\n\n")
 	}
-	return out
+	return
 }
 
-// convertStopToStopSequences renames OpenAI's "stop" field to Anthropic's
-// "stop_sequences". OpenAI accepts both a single string or an array;
-// Anthropic requires an array.
-func (c *openaiToAnthropicConverter) convertStopToStopSequences(out, req map[string]interface{}) map[string]interface{} {
-	stopVal, ok := req["stop"]
-	if !ok {
-		return out
+func toAnthropicMessages(messages []OpenAIChatMessage) []AnthropicMessage {
+	anth := make([]AnthropicMessage, 0, len(messages))
+	for _, m := range messages {
+		anth = append(anth, AnthropicMessage{
+			Role:    m.Role,
+			Content: m.Content,
+		})
 	}
-	switch v := stopVal.(type) {
-	case string:
-		out["stop_sequences"] = []string{v}
-	case []interface{}:
-		seqs := make([]string, 0, len(v))
-		for _, s := range v {
-			if str, ok := s.(string); ok {
-				seqs = append(seqs, str)
-			}
-		}
-		out["stop_sequences"] = seqs
-	}
-	return out
+	return anth
 }
 
-// ensureMaxTokens guarantees "max_tokens" is present.
-// Anthropic requires this field; OpenAI does not. Default to 4096 when missing.
-func (c *openaiToAnthropicConverter) ensureMaxTokens(out, req map[string]interface{}) map[string]interface{} {
-	if req["max_tokens"] != nil {
-		out["max_tokens"] = req["max_tokens"]
-	} else {
-		out["max_tokens"] = 4096
+func defaultInt(v *int, def int) int {
+	if v != nil {
+		return *v
 	}
-	return out
+	return def
 }
-
-// --- Response: Anthropic → OpenAI ---
 
 func (c *openaiToAnthropicConverter) ConvertResponse(body []byte) ([]byte, error) {
-	var a map[string]interface{}
-	if err := json.Unmarshal(body, &a); err != nil {
+	var anthResp AnthropicResponse
+	if err := json.Unmarshal(body, &anthResp); err != nil {
 		return nil, err
 	}
 
-	out := copyMap(a,
-		"type",        // replaced with object: "chat.completion"
-		"content",     // restructured into choices[0].message
-		"stop_reason", // renamed to choices[0].finish_reason
-		"usage",       // field names differ
-		"role",        // added explicitly below
-	)
-
-	out["object"] = "chat.completion"
-	content := c.extractTextFromContentBlocks(a)
-	sr, _ := a["stop_reason"].(string)
-	finishReason := c.mapStopReason(sr)
-	usage := c.remapUsageToOpenAI(a)
-
-	out["choices"] = []map[string]interface{}{
-		{
-			"index": 0,
-			"message": map[string]interface{}{
-				"role":    "assistant",
-				"content": content,
+	oaiResp := OpenAIChatResponse{
+		ID:      anthResp.ID,
+		Object:  OpenAIChatObject,
+		Created: time.Now().Unix(),
+		Model:   anthResp.Model,
+		Choices: []OpenAIChatChoice{
+			{
+				Index: 0,
+				Message: OpenAIChatMessage{
+					Role:    OpenAIRoleAssistant,
+					Content: extractText(anthResp.Content),
+				},
+				FinishReason: mapAnthropicStopReason(anthResp.StopReason),
 			},
-			"finish_reason": finishReason,
 		},
 	}
-	out["usage"] = usage
 
-	return json.Marshal(out)
+	if anthResp.Usage != nil {
+		oaiResp.Usage = &Usage{
+			PromptTokens:     anthResp.Usage.InputTokens,
+			CompletionTokens: anthResp.Usage.OutputTokens,
+			TotalTokens:      anthResp.Usage.InputTokens + anthResp.Usage.OutputTokens,
+		}
+	}
+
+	return json.Marshal(oaiResp)
 }
 
-// extractTextFromContentBlocks extracts the text from Anthropic's content[0] block.
-// Anthropic returns content as [{type: "text", text: "..."}];
-// OpenAI uses choices[0].message.content as a plain string.
-func (c *openaiToAnthropicConverter) extractTextFromContentBlocks(a map[string]interface{}) string {
-	contentArr, _ := a["content"].([]interface{})
-	if len(contentArr) == 0 {
+func extractText(blocks []AnthropicContentBlock) string {
+	if len(blocks) == 0 {
 		return ""
 	}
-	block, ok := contentArr[0].(map[string]interface{})
-	if !ok {
-		return ""
-	}
-	text, _ := block["text"].(string)
-	return text
+	return blocks[0].Text
 }
 
-// mapStopReason converts Anthropic's stop_reason to OpenAI's finish_reason.
-// end_turn → stop, max_tokens → length, stop_sequence → stop.
-func (c *openaiToAnthropicConverter) mapStopReason(stopReason string) string {
+func mapAnthropicStopReason(stopReason string) string {
 	switch stopReason {
-	case "end_turn":
-		return "stop"
-	case "max_tokens":
-		return "length"
-	case "stop_sequence":
-		return "stop"
+	case AnthropicStopReasonEndTurn:
+		return OpenAIFinishReasonStop
+	case AnthropicStopReasonMaxTokens:
+		return OpenAIFinishReasonLength
+	case AnthropicStopReasonStopSequence:
+		return OpenAIFinishReasonStop
 	default:
-		return "stop"
+		return OpenAIFinishReasonStop
 	}
 }
-
-// remapUsageToOpenAI converts Anthropic usage (input_tokens, output_tokens) to
-// OpenAI usage (prompt_tokens, completion_tokens, total_tokens).
-func (c *openaiToAnthropicConverter) remapUsageToOpenAI(a map[string]interface{}) map[string]interface{} {
-	u, ok := a["usage"].(map[string]interface{})
-	if !ok {
-		return nil
-	}
-	input, _ := u["input_tokens"].(float64)
-	output, _ := u["output_tokens"].(float64)
-	return map[string]interface{}{
-		"prompt_tokens":     int(input),
-		"completion_tokens": int(output),
-		"total_tokens":      int(input) + int(output),
-	}
-}
-
-// --- SSE: Anthropic → OpenAI ---
 
 func (c *openaiToAnthropicConverter) ConvertSSE(r io.ReadCloser) io.ReadCloser {
 	pr, pw := io.Pipe()
@@ -213,93 +157,73 @@ func (c *openaiToAnthropicConverter) ConvertSSE(r io.ReadCloser) io.ReadCloser {
 
 				switch event.Event {
 				case AnthropicSSEMessageStartEvent:
-					var data map[string]interface{}
-					if err := json.Unmarshal([]byte(event.Data), &data); err != nil {
+					var evt AnthropicSSEEvent
+					if err := json.Unmarshal([]byte(event.Data), &evt); err != nil {
 						continue
 					}
-					if msg, ok := data["message"].(map[string]interface{}); ok {
-						if m, ok := msg["model"].(string); ok {
-							model = m
-						}
+					if evt.Message != nil {
+						model = evt.Message.Model
 					}
 
-					chunk := map[string]interface{}{
-						"id":      extractString(data, "message", "id"),
-						"object":  "chat.completion.chunk",
-						"created": time.Now().Unix(),
-						"model":   model,
-						"choices": []map[string]interface{}{
-							{
-								"index": 0,
-								"delta": map[string]interface{}{
-									"role": "assistant",
-								},
-							},
+				chunk := OpenAIChatStreamChunk{
+					ID:     extractSSEID(event.Data),
+					Object: OpenAIChatStreamChunkObject,
+					Model:  model,
+					Choices: []OpenAIChatStreamChoice{
+						{
+							Index: 0,
+							Delta: OpenAIChatDelta{Role: OpenAIRoleAssistant},
 						},
-					}
+					},
+				}
 					writeSSEJSON(pw, "", chunk)
 
-				case AnthropicSSEContentBlockDeltaEvent:
-					var data map[string]interface{}
-					if err := json.Unmarshal([]byte(event.Data), &data); err != nil {
-						continue
-					}
-					delta, _ := data["delta"].(map[string]interface{})
-					if delta == nil {
-						continue
-					}
-					deltaType, _ := delta["type"].(string)
-					if deltaType != "text_delta" {
-						continue
-					}
-					text, _ := delta["text"].(string)
+			case AnthropicSSEContentBlockDeltaEvent:
+				var evt AnthropicSSEEvent
+				if err := json.Unmarshal([]byte(event.Data), &evt); err != nil {
+					continue
+				}
+				if evt.Delta == nil || evt.Delta.Type != AnthropicDeltaTypeTextDelta {
+					continue
+				}
 
-					chunk := map[string]interface{}{
-						"object":  "chat.completion.chunk",
-						"created": time.Now().Unix(),
-						"model":   model,
-						"choices": []map[string]interface{}{
-							{
-								"index": 0,
-								"delta": map[string]interface{}{
-									"content": text,
-								},
-							},
+				chunk := OpenAIChatStreamChunk{
+					Object: OpenAIChatStreamChunkObject,
+					Choices: []OpenAIChatStreamChoice{
+						{
+							Index: 0,
+							Delta: OpenAIChatDelta{Content: evt.Delta.Text},
 						},
-					}
-					writeSSEJSON(pw, "", chunk)
+					},
+				}
+				writeSSEJSON(pw, "", chunk)
 
-				case AnthropicSSEMessageDeltaEvent:
-					var data map[string]interface{}
-					if err := json.Unmarshal([]byte(event.Data), &data); err != nil {
-						continue
-					}
-					delta, _ := data["delta"].(map[string]interface{})
-					if delta == nil {
-						continue
-					}
-					stopReason, _ := delta["stop_reason"].(string)
-					finish := c.mapStopReason(stopReason)
+			case AnthropicSSEMessageDeltaEvent:
+				var evt AnthropicSSEEvent
+				if err := json.Unmarshal([]byte(event.Data), &evt); err != nil {
+					continue
+				}
+				stopReason := ""
+				if evt.Delta != nil {
+					stopReason = evt.Delta.StopReason
+				}
 
-					chunk := map[string]interface{}{
-						"object":  "chat.completion.chunk",
-						"created": time.Now().Unix(),
-						"model":   model,
-						"choices": []map[string]interface{}{
-							{
-								"index":         0,
-								"delta":         map[string]interface{}{},
-								"finish_reason": finish,
-							},
+				chunk := OpenAIChatStreamChunk{
+					Object: OpenAIChatStreamChunkObject,
+					Choices: []OpenAIChatStreamChoice{
+						{
+							Index:         0,
+							Delta:         OpenAIChatDelta{},
+							FinishReason:  mapAnthropicStopReason(stopReason),
 						},
-					}
-					writeSSEJSON(pw, "", chunk)
+					},
+				}
+				writeSSEJSON(pw, "", chunk)
 
-				case AnthropicSSEMessageStopEvent:
-					WriteSSE(pw, SSEEvent{Data: "[DONE]"})
+			case AnthropicSSEMessageStopEvent:
+				WriteSSE(pw, SSEEvent{Data: SSEDoneMarker})
 
 				case AnthropicSSEPingEvent:
-					// ignore pings
 				}
 
 			case err, ok := <-errs:
@@ -313,4 +237,17 @@ func (c *openaiToAnthropicConverter) ConvertSSE(r io.ReadCloser) io.ReadCloser {
 	}()
 
 	return pr
+}
+
+func extractSSEID(data string) string {
+	var raw map[string]interface{}
+	if err := json.Unmarshal([]byte(data), &raw); err != nil {
+		return ""
+	}
+	msg, ok := raw["message"].(map[string]interface{})
+	if !ok {
+		return ""
+	}
+	id, _ := msg["id"].(string)
+	return id
 }

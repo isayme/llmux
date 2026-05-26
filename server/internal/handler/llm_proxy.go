@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -85,14 +86,20 @@ func (h *ProxyHandler) ListModelsHandler(c *gin.Context) {
 }
 
 func (h *ProxyHandler) handleProxy(c *gin.Context, usedProtocol convert.UsedAIProtocol) {
-	var req map[string]interface{}
-	if err := json.NewDecoder(c.Request.Body).Decode(&req); err != nil {
+	bodyBytes, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		c.Error(BadRequest.WithMessage("read req body failed", err))
+		return
+	}
+
+	var rawMap map[string]interface{}
+	if err := json.Unmarshal(bodyBytes, &rawMap); err != nil {
 		c.Error(BadRequest.WithMessage("json parse req body failed", err))
 		return
 	}
 
 	_, parseSpan := trace.StartSpan(c.Request.Context(), "parse request")
-	rawModel, err := getModel(req)
+	rawModel, err := getModel(rawMap)
 	if err != nil {
 		trace.SetError(parseSpan, err)
 		parseSpan.End()
@@ -113,7 +120,7 @@ func (h *ProxyHandler) handleProxy(c *gin.Context, usedProtocol convert.UsedAIPr
 	trace.SetAttributes(resolveSpan, attribute.String("alias", rawModel))
 	resolveSpan.End()
 
-	isStream, err := isStream(req)
+	isStream, err := isStream(rawMap)
 	if err != nil {
 		c.Error(BadRequest.WithMessage("get stream failed", err))
 		return
@@ -133,8 +140,6 @@ func (h *ProxyHandler) handleProxy(c *gin.Context, usedProtocol convert.UsedAIPr
 			return
 		}
 
-		req["model"] = model
-
 		provider, err := findProvider(providerId)
 		if err != nil {
 			c.Error(NotFound.WithMessage("provider not found", err))
@@ -149,6 +154,8 @@ func (h *ProxyHandler) handleProxy(c *gin.Context, usedProtocol convert.UsedAIPr
 			return
 		}
 
+		req := buildTypedRequest(bodyBytes, model, usedProtocol)
+
 		converter := convert.GetConverter(usedProtocol, provider.Type)
 
 		_, convertReqSpan := trace.StartSpan(c.Request.Context(), "convert request")
@@ -157,12 +164,24 @@ func (h *ProxyHandler) handleProxy(c *gin.Context, usedProtocol convert.UsedAIPr
 			attribute.String("from_protocol", usedProtocol.String()),
 			attribute.String("to_provider_type", provider.Type),
 		)
-		forwardBody := converter.ConvertRequest(req)
+		forwardBody, err := converter.ConvertRequest(req)
+		if err != nil {
+			trace.SetError(convertReqSpan, err)
+			convertReqSpan.End()
+			c.Error(InternalServerError.WithMessage("convert request failed", err))
+			return
+		}
 		convertReqSpan.End()
+
+		forwardBytes, err := json.Marshal(forwardBody)
+		if err != nil {
+			c.Error(InternalServerError.WithMessage("marshal forward body failed", err))
+			return
+		}
 
 		forwardPath := getProviderPath(provider.Type)
 
-		resp, err := forwardRequest(c.Request.Context(), getHttpClient(isStream), provider, c.Request.Method, forwardPath, c.Request.Header, forwardBody)
+		resp, err := forwardRequest(c.Request.Context(), getHttpClient(isStream), provider, c.Request.Method, forwardPath, c.Request.Header, forwardBytes)
 		if err != nil {
 			if canRetry {
 				continue
@@ -222,6 +241,27 @@ func (h *ProxyHandler) handleProxy(c *gin.Context, usedProtocol convert.UsedAIPr
 		c.Writer.Write(respBody)
 		return
 	}
+}
+
+func buildTypedRequest(bodyBytes []byte, model string, usedProtocol convert.UsedAIProtocol) any {
+	switch usedProtocol {
+	case convert.ProtocolOpenAI:
+		var req convert.OpenAIChatRequest
+		json.Unmarshal(bodyBytes, &req)
+		req.Model = model
+		return &req
+	case convert.ProtocolAnthropic:
+		var req convert.AnthropicRequest
+		json.Unmarshal(bodyBytes, &req)
+		req.Model = model
+		return &req
+	case convert.ProtocolOpenAIResponses:
+		var req convert.OpenAIResponsesRequest
+		json.Unmarshal(bodyBytes, &req)
+		req.Model = model
+		return &req
+	}
+	return nil
 }
 
 // resolveModelSelector resolves a model name or alias to a ModelSelector.
@@ -314,7 +354,7 @@ func getProviderPath(providerType string) string {
 	}
 }
 
-func forwardRequest(ctx context.Context, httpClient *http.Client, provider *config.ProviderConfig, method, path string, header http.Header, body map[string]interface{}) (*http.Response, error) {
+func forwardRequest(ctx context.Context, httpClient *http.Client, provider *config.ProviderConfig, method, path string, header http.Header, body []byte) (*http.Response, error) {
 	ctx, upstreamSpan := trace.StartSpan(ctx, "upstream call",
 		attribute.String("provider", provider.ID),
 		attribute.String("provider_type", provider.Type),
@@ -324,9 +364,8 @@ func forwardRequest(ctx context.Context, httpClient *http.Client, provider *conf
 	url := strings.TrimSuffix(provider.BaseURL, "/") + path
 
 	var bodyReader io.Reader
-	if body != nil {
-		reqBytes, _ := json.Marshal(body)
-		bodyReader = strings.NewReader(string(reqBytes))
+	if len(body) > 0 {
+		bodyReader = bytes.NewReader(body)
 	}
 	req, err := http.NewRequestWithContext(ctx, method, url, bodyReader)
 	if err != nil {

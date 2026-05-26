@@ -7,10 +7,8 @@ import (
 	"strings"
 )
 
-type SSEEvent struct {
-	Event string
-	Data  string
-}
+// SSEDoneMarker signals the end of an SSE stream in OpenAI Chat / Responses streaming.
+const SSEDoneMarker = "[DONE]"
 
 func ParseSSE(r io.Reader) (<-chan SSEEvent, <-chan error) {
 	events := make(chan SSEEvent)
@@ -67,8 +65,8 @@ func WriteSSE(w io.Writer, event SSEEvent) error {
 		}
 	}
 
-	if event.Data == "[DONE]" {
-		_, err := io.WriteString(w, "data: [DONE]\n\n")
+	if event.Data == SSEDoneMarker {
+		_, err := io.WriteString(w, "data: "+SSEDoneMarker+"\n\n")
 		return err
 	}
 

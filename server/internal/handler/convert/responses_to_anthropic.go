@@ -2,84 +2,86 @@ package convert
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 )
 
 type responsesToAnthropicConverter struct{}
 
-func (c *responsesToAnthropicConverter) ConvertRequest(req map[string]interface{}) map[string]interface{} {
-	out := copyMap(req,
-		"input",
-		"instructions",
-		"max_output_tokens",
-	)
-
-	if v, ok := req["max_output_tokens"]; ok {
-		out["max_tokens"] = v
+func (c *responsesToAnthropicConverter) ConvertRequest(req any) (any, error) {
+	respReq, ok := req.(*OpenAIResponsesRequest)
+	if !ok {
+		return nil, errors.New("expected *OpenAIResponsesRequest")
 	}
 
-	if instructions, ok := req["instructions"]; ok {
-		if s, ok := instructions.(string); ok && s != "" {
-			out["system"] = s
+	anthReq := &AnthropicRequest{
+		Model: respReq.Model,
+	}
+
+	if respReq.MaxOutputTokens != nil {
+		anthReq.MaxTokens = *respReq.MaxOutputTokens
+	} else {
+		anthReq.MaxTokens = 4096
+	}
+
+	if respReq.Instructions != "" {
+		anthReq.System = respReq.Instructions
+	}
+
+	switch input := respReq.Input.(type) {
+	case string:
+		anthReq.Messages = []AnthropicMessage{
+			{
+				Role:    AnthropicRoleUser,
+				Content: input,
+			},
 		}
-	}
-
-	if input, ok := req["input"]; ok {
-		switch v := input.(type) {
-		case string:
-			out["messages"] = []interface{}{
-				map[string]interface{}{
-					"role":    "user",
-					"content": v,
-				},
-			}
-		case []interface{}:
-			var messages []interface{}
-			for _, item := range v {
-				if m, ok := item.(map[string]interface{}); ok {
-					if m["type"] == "message" {
-						messages = append(messages, map[string]interface{}{
-							"role":    m["role"],
-							"content": m["content"],
-						})
-					}
+	case []interface{}:
+		var messages []AnthropicMessage
+		for _, item := range input {
+			if m, ok := item.(map[string]interface{}); ok {
+				if m["type"] == "message" {
+					messages = append(messages, AnthropicMessage{
+						Role:    m["role"].(string),
+						Content: m["content"],
+					})
 				}
 			}
-			out["messages"] = messages
 		}
+		anthReq.Messages = messages
 	}
 
-	return out
+	return anthReq, nil
 }
 
 func (c *responsesToAnthropicConverter) ConvertResponse(body []byte) ([]byte, error) {
-	var resp map[string]interface{}
-	if err := json.Unmarshal(body, &resp); err != nil {
+	var respResp OpenAIResponsesResponse
+	if err := json.Unmarshal(body, &respResp); err != nil {
 		return nil, err
 	}
 
-	out := copyMap(resp,
-		"output",
-		"object",
-	)
-
-	out["type"] = "message"
-	out["role"] = "assistant"
-
-	text := extractResponsesContent(resp)
-
-	out["content"] = []map[string]interface{}{
-		{"type": "text", "text": text},
+	anthResp := AnthropicResponse{
+		ID:         respResp.ID,
+		Type:       AnthropicObjectMessage,
+		Role:       AnthropicRoleAssistant,
+		Model:      respResp.Model,
+		StopReason: AnthropicStopReasonEndTurn,
+		Content: []AnthropicContentBlock{
+			{
+				Type: AnthropicContentTypeText,
+				Text: extractResponsesText(respResp.Output),
+			},
+		},
 	}
 
-	if u, ok := resp["usage"].(map[string]interface{}); ok {
-		out["usage"] = map[string]interface{}{
-			"input_tokens":  toFloat64(u["input_tokens"]),
-			"output_tokens": toFloat64(u["output_tokens"]),
+	if respResp.Usage != nil {
+		anthResp.Usage = &AnthropicUsage{
+			InputTokens:  respResp.Usage.InputTokens,
+			OutputTokens: respResp.Usage.OutputTokens,
 		}
 	}
 
-	return json.Marshal(out)
+	return json.Marshal(anthResp)
 }
 
 func (c *responsesToAnthropicConverter) ConvertSSE(r io.ReadCloser) io.ReadCloser {
@@ -87,7 +89,6 @@ func (c *responsesToAnthropicConverter) ConvertSSE(r io.ReadCloser) io.ReadClose
 
 	go func() {
 		defer pw.Close()
-		defer r.Close()
 
 		events, errs := ParseSSE(r)
 
@@ -102,63 +103,66 @@ func (c *responsesToAnthropicConverter) ConvertSSE(r io.ReadCloser) io.ReadClose
 				}
 
 				switch event.Event {
-				case "response.created":
-					var data map[string]interface{}
-					if err := json.Unmarshal([]byte(event.Data), &data); err != nil {
+				case ResponsesSSECreated:
+					var evt OpenAIResponsesStreamEvent
+					if err := json.Unmarshal([]byte(event.Data), &evt); err != nil {
 						continue
 					}
-					messageID = extractString(data, "response", "id")
+					if evt.Response != nil {
+						messageID = evt.Response.ID
+					}
 
-					writeSSEJSON(pw, AnthropicSSEMessageStartEvent, map[string]interface{}{
-						"type": "message_start",
-						"message": map[string]interface{}{
-							"id":      messageID,
-							"type":    "message",
-							"role":    "assistant",
-							"content": []interface{}{},
+					writeSSEJSON(pw, AnthropicSSEMessageStartEvent, AnthropicSSEEvent{
+						Type: AnthropicSSEMessageStartEvent,
+						Message: &AnthropicResponse{
+							ID:      messageID,
+							Type:    AnthropicObjectMessage,
+							Role:    AnthropicRoleAssistant,
+							Content: []AnthropicContentBlock{},
 						},
 					})
-					writeSSEJSON(pw, AnthropicSSEContentBlockStartEvent, map[string]interface{}{
-						"type":  "content_block_start",
-						"index": 0,
-						"content_block": map[string]interface{}{
-							"type": "text",
-							"text": "",
+					writeSSEJSON(pw, AnthropicSSEContentBlockStartEvent, AnthropicSSEEvent{
+						Type:  AnthropicSSEContentBlockStartEvent,
+						Index: intPtr(0),
+						ContentBlock: &AnthropicContentBlock{
+							Type: AnthropicContentTypeText,
+							Text: "",
 						},
 					})
 					started = true
 
-				case "response.text.delta":
+				case ResponsesSSETextDelta:
 					if !started {
 						continue
 					}
-					var data map[string]interface{}
-					if err := json.Unmarshal([]byte(event.Data), &data); err != nil {
+					var evt OpenAIResponsesStreamEvent
+					if err := json.Unmarshal([]byte(event.Data), &evt); err != nil {
 						continue
 					}
-					writeSSEJSON(pw, AnthropicSSEContentBlockDeltaEvent, map[string]interface{}{
-						"type":  "content_block_delta",
-						"index": 0,
-						"delta": map[string]interface{}{
-							"type": "text_delta",
-							"text": data["delta"],
+
+					writeSSEJSON(pw, AnthropicSSEContentBlockDeltaEvent, AnthropicSSEEvent{
+						Type:  AnthropicSSEContentBlockDeltaEvent,
+						Index: intPtr(0),
+						Delta: &AnthropicSSEDelta{
+							Type: AnthropicDeltaTypeTextDelta,
+							Text: evt.Delta,
 						},
 					})
 
-				case "response.done":
+				case ResponsesSSEDone:
 					if started {
-						writeSSEJSON(pw, AnthropicSSEContentBlockStopEvent, map[string]interface{}{
-							"type":  "content_block_stop",
-							"index": 0,
+						writeSSEJSON(pw, AnthropicSSEContentBlockStopEvent, AnthropicSSEEvent{
+							Type:  AnthropicSSEContentBlockStopEvent,
+							Index: intPtr(0),
 						})
-						writeSSEJSON(pw, AnthropicSSEMessageDeltaEvent, map[string]interface{}{
-							"type": "message_delta",
-							"delta": map[string]interface{}{
-								"stop_reason": "end_turn",
+						writeSSEJSON(pw, AnthropicSSEMessageDeltaEvent, AnthropicSSEEvent{
+							Type: AnthropicSSEMessageDeltaEvent,
+							Delta: &AnthropicSSEDelta{
+								StopReason: AnthropicStopReasonEndTurn,
 							},
 						})
-						writeSSEJSON(pw, AnthropicSSEMessageStopEvent, map[string]interface{}{
-							"type": "message_stop",
+						writeSSEJSON(pw, AnthropicSSEMessageStopEvent, AnthropicSSEEvent{
+							Type: AnthropicSSEMessageStopEvent,
 						})
 					}
 				}

@@ -1,78 +1,12 @@
 package convert
 
 import (
-	"testing"
 	"bytes"
 	"encoding/json"
 	"io"
 	"strings"
+	"testing"
 )
-
-// ============================================================
-// copyMap
-// ============================================================
-
-func TestCopyMap(t *testing.T) {
-	src := map[string]interface{}{
-		"a": 1,
-		"b": "two",
-		"c": true,
-	}
-	out := copyMap(src, "b")
-	if out["a"] != 1 {
-		t.Error("expected a=1")
-	}
-	if out["b"] != nil {
-		t.Error("expected b to be omitted")
-	}
-	if out["c"] != true {
-		t.Error("expected c=true")
-	}
-}
-
-func TestCopyMapEmptyOmit(t *testing.T) {
-	src := map[string]interface{}{"a": 1}
-	out := copyMap(src)
-	if len(out) != 1 || out["a"] != 1 {
-		t.Error("expected passthrough")
-	}
-}
-
-func TestCopyMapEmptySrc(t *testing.T) {
-	out := copyMap(map[string]interface{}{}, "a")
-	if len(out) != 0 {
-		t.Error("expected empty")
-	}
-}
-
-// ============================================================
-// extractString
-// ============================================================
-
-func TestExtractString(t *testing.T) {
-	m := map[string]interface{}{
-		"msg": map[string]interface{}{
-			"id": "abc123",
-		},
-	}
-	if s := extractString(m, "msg", "id"); s != "abc123" {
-		t.Errorf("expected abc123, got %q", s)
-	}
-}
-
-func TestExtractStringMissingKey(t *testing.T) {
-	m := map[string]interface{}{"a": "1"}
-	if s := extractString(m, "a", "b"); s != "" {
-		t.Errorf("expected empty, got %q", s)
-	}
-}
-
-func TestExtractStringNotAMap(t *testing.T) {
-	m := map[string]interface{}{"a": "string"}
-	if s := extractString(m, "a", "b"); s != "" {
-		t.Errorf("expected empty, got %q", s)
-	}
-}
 
 // ============================================================
 // GetConverter
@@ -103,6 +37,41 @@ func TestGetConverterSameProtocol(t *testing.T) {
 	}
 }
 
+func TestGetConverterResponsesToOpenAI(t *testing.T) {
+	c := GetConverter(ProtocolOpenAIResponses, "openai")
+	if _, ok := c.(*responsesToOpenAIConverter); !ok {
+		t.Errorf("expected responsesToOpenAIConverter, got %T", c)
+	}
+}
+
+func TestGetConverterOpenAIToResponses(t *testing.T) {
+	c := GetConverter(ProtocolOpenAI, "openai_responses")
+	if _, ok := c.(*openaiToResponsesConverter); !ok {
+		t.Errorf("expected openaiToResponsesConverter, got %T", c)
+	}
+}
+
+func TestGetConverterResponsesToAnthropic(t *testing.T) {
+	c := GetConverter(ProtocolOpenAIResponses, "anthropic")
+	if _, ok := c.(*responsesToAnthropicConverter); !ok {
+		t.Errorf("expected responsesToAnthropicConverter, got %T", c)
+	}
+}
+
+func TestGetConverterAnthropicToResponses(t *testing.T) {
+	c := GetConverter(ProtocolAnthropic, "openai_responses")
+	if _, ok := c.(*anthropicToResponsesConverter); !ok {
+		t.Errorf("expected anthropicToResponsesConverter, got %T", c)
+	}
+}
+
+func TestGetConverterResponsesSameProtocol(t *testing.T) {
+	c := GetConverter(ProtocolOpenAIResponses, "openai_responses")
+	if _, ok := c.(*noopConverter); !ok {
+		t.Errorf("expected noopConverter, got %T", c)
+	}
+}
+
 // ============================================================
 // noopConverter
 // ============================================================
@@ -110,8 +79,12 @@ func TestGetConverterSameProtocol(t *testing.T) {
 func TestNoopConverter(t *testing.T) {
 	c := &noopConverter{}
 	req := map[string]interface{}{"model": "gpt-4"}
-	out := c.ConvertRequest(req)
-	if out["model"] != "gpt-4" {
+	out, err := c.ConvertRequest(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, ok := out.(map[string]interface{})
+	if !ok || m["model"] != "gpt-4" {
 		t.Error("expected passthrough request")
 	}
 
@@ -127,13 +100,14 @@ func TestNoopConverter(t *testing.T) {
 		t.Error("expected passthrough SSE")
 	}
 }
+
 // ============================================================
 // SSE: WriteSSE
 // ============================================================
 
 func TestWriteSSE_WithEvent(t *testing.T) {
 	var buf bytes.Buffer
-	err := WriteSSE(&buf, SSEEvent{Event: "message_start", Data: `{"type":"message_start"}`})
+	err := WriteSSE(&buf, SSEEvent{Event: AnthropicSSEMessageStartEvent, Data: `{"type":"message_start"}`})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -159,7 +133,7 @@ func TestWriteSSE_NoEvent(t *testing.T) {
 
 func TestWriteSSE_Done(t *testing.T) {
 	var buf bytes.Buffer
-	err := WriteSSE(&buf, SSEEvent{Data: "[DONE]"})
+	err := WriteSSE(&buf, SSEEvent{Data: SSEDoneMarker})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -178,6 +152,7 @@ func TestWriteSSE_EmptyEvent(t *testing.T) {
 		t.Errorf("expected simple data, got %q", buf.String())
 	}
 }
+
 // ============================================================
 // SSE: ParseSSE
 // ============================================================
@@ -194,7 +169,7 @@ func TestParseSSE_BasicEvent(t *testing.T) {
 		t.Fatal("unexpected error")
 	}
 
-	if evt.Event != "message_start" {
+	if evt.Event != AnthropicSSEMessageStartEvent {
 		t.Errorf("expected message_start, got %q", evt.Event)
 	}
 	if evt.Data != `{"type":"msg"}` {
@@ -257,7 +232,7 @@ func TestParseSSE_DoneEvent(t *testing.T) {
 	events, _ := ParseSSE(r)
 
 	e := <-events
-	if e.Data != "[DONE]" {
+	if e.Data != SSEDoneMarker {
 		t.Errorf("expected [DONE], got %q", e.Data)
 	}
 }
@@ -275,6 +250,7 @@ func TestParseSSE_OpenAIFormat(t *testing.T) {
 		t.Errorf("got data %q", e.Data)
 	}
 }
+
 // ============================================================
 // Helper: writeSSEJSON
 // ============================================================
@@ -293,8 +269,9 @@ func TestWriteSSEJSON(t *testing.T) {
 		t.Error("expected JSON payload")
 	}
 }
+
 // ============================================================
-// Edge: ConvertResponse with invalid JSON
+// ConvertResponse: invalid JSON
 // ============================================================
 
 func TestConvertResponse_InvalidJSON(t *testing.T) {
@@ -309,31 +286,75 @@ func TestConvertResponse_InvalidJSON(t *testing.T) {
 	if err == nil {
 		t.Error("expected error for invalid JSON")
 	}
+
+	c3 := &responsesToOpenAIConverter{}
+	_, err = c3.ConvertResponse([]byte("not-json"))
+	if err == nil {
+		t.Error("expected error for invalid JSON")
+	}
+
+	c4 := &openaiToResponsesConverter{}
+	_, err = c4.ConvertResponse([]byte("not-json"))
+	if err == nil {
+		t.Error("expected error for invalid JSON")
+	}
+
+	c5 := &responsesToAnthropicConverter{}
+	_, err = c5.ConvertResponse([]byte("not-json"))
+	if err == nil {
+		t.Error("expected error for invalid JSON")
+	}
+
+	c6 := &anthropicToResponsesConverter{}
+	_, err = c6.ConvertResponse([]byte("not-json"))
+	if err == nil {
+		t.Error("expected error for invalid JSON")
+	}
 }
+
 // ============================================================
-// Round-trip: request stays valid JSON after conversion
+// ConvertRequest: type assertion error
+// ============================================================
+
+func TestConvertRequest_WrongType(t *testing.T) {
+	c := &openaiToAnthropicConverter{}
+	_, err := c.ConvertRequest("not-a-pointer-to-struct")
+	if err == nil {
+		t.Error("expected error for wrong request type")
+	}
+
+	c2 := &anthropicToOpenAIConverter{}
+	_, err = c2.ConvertRequest("not-a-pointer-to-struct")
+	if err == nil {
+		t.Error("expected error for wrong request type")
+	}
+}
+
+// ============================================================
+// Round-trip: verify valid JSON output
 // ============================================================
 
 func TestRoundTrip_RequestJSON(t *testing.T) {
-	oaiReq := map[string]interface{}{
-		"model": "gpt-4",
-		"messages": []interface{}{
-			map[string]interface{}{"role": "system", "content": "You are helpful."},
-			map[string]interface{}{"role": "user", "content": "Hello"},
+	oaiReq := &OpenAIChatRequest{
+		Model: "gpt-4",
+		Messages: []OpenAIChatMessage{
+			{Role: "system", Content: "You are helpful."},
+			{Role: "user", Content: "Hello"},
 		},
-		"stop": "END",
+		Stop: []string{"END"},
 	}
 
 	c := &openaiToAnthropicConverter{}
-	converted := c.ConvertRequest(oaiReq)
+	result, err := c.ConvertRequest(oaiReq)
+	if err != nil {
+		t.Fatalf("ConvertRequest failed: %v", err)
+	}
 
-	// Verify result is marshalable as JSON
-	data, err := json.Marshal(converted)
+	data, err := json.Marshal(result)
 	if err != nil {
 		t.Fatalf("converted request is not valid JSON: %v", err)
 	}
 
-	// Unmarshal back and check fields
 	var back map[string]interface{}
 	json.Unmarshal(data, &back)
 
@@ -345,9 +366,6 @@ func TestRoundTrip_RequestJSON(t *testing.T) {
 	}
 	if _, ok := back["stop_sequences"]; !ok {
 		t.Error("expected stop_sequences")
-	}
-	if _, ok := back["stop"]; ok {
-		t.Error("expected stop to be removed")
 	}
 }
 
@@ -364,115 +382,16 @@ func TestRoundTrip_ResponseJSON(t *testing.T) {
 	if err := json.Unmarshal(out, &oai); err != nil {
 		t.Fatalf("converted response is not valid JSON: %v", err)
 	}
-	if oai["object"] != "chat.completion" {
+	if oai["object"] != OpenAIChatObject {
 		t.Error("expected object")
 	}
 	choices := oai["choices"].([]interface{})
 	choice := choices[0].(map[string]interface{})
 	msg := choice["message"].(map[string]interface{})
-	if msg["role"] != "assistant" {
+	if msg["role"] != OpenAIRoleAssistant {
 		t.Error("expected assistant role")
 	}
 	if msg["content"] != "Hi" {
 		t.Error("expected Hi content")
-	}
-}
-// ============================================================
-// GetConverter — new protocol combinations
-// ============================================================
-
-func TestGetConverterResponsesToOpenAI(t *testing.T) {
-	c := GetConverter(ProtocolOpenAIResponses, "openai")
-	if _, ok := c.(*responsesToOpenAIConverter); !ok {
-		t.Errorf("expected responsesToOpenAIConverter, got %T", c)
-	}
-}
-
-func TestGetConverterOpenAIToResponses(t *testing.T) {
-	c := GetConverter(ProtocolOpenAI, "openai_responses")
-	if _, ok := c.(*openaiToResponsesConverter); !ok {
-		t.Errorf("expected openaiToResponsesConverter, got %T", c)
-	}
-}
-
-func TestGetConverterResponsesToAnthropic(t *testing.T) {
-	c := GetConverter(ProtocolOpenAIResponses, "anthropic")
-	if _, ok := c.(*responsesToAnthropicConverter); !ok {
-		t.Errorf("expected responsesToAnthropicConverter, got %T", c)
-	}
-}
-
-func TestGetConverterAnthropicToResponses(t *testing.T) {
-	c := GetConverter(ProtocolAnthropic, "openai_responses")
-	if _, ok := c.(*anthropicToResponsesConverter); !ok {
-		t.Errorf("expected anthropicToResponsesConverter, got %T", c)
-	}
-}
-
-func TestGetConverterResponsesSameProtocol(t *testing.T) {
-	c := GetConverter(ProtocolOpenAIResponses, "openai_responses")
-	if _, ok := c.(*noopConverter); !ok {
-		t.Errorf("expected noopConverter, got %T", c)
-	}
-}
-// ============================================================
-func TestConvertResponse_InvalidJSON_NewConverters(t *testing.T) {
-	c1 := &responsesToOpenAIConverter{}
-	_, err := c1.ConvertResponse([]byte("not-json"))
-	if err == nil {
-		t.Error("expected error for invalid JSON")
-	}
-
-	c2 := &openaiToResponsesConverter{}
-	_, err = c2.ConvertResponse([]byte("not-json"))
-	if err == nil {
-		t.Error("expected error for invalid JSON")
-	}
-
-	c3 := &responsesToAnthropicConverter{}
-	_, err = c3.ConvertResponse([]byte("not-json"))
-	if err == nil {
-		t.Error("expected error for invalid JSON")
-	}
-
-	c4 := &anthropicToResponsesConverter{}
-	_, err = c4.ConvertResponse([]byte("not-json"))
-	if err == nil {
-		t.Error("expected error for invalid JSON")
-	}
-}
-
-// ============================================================
-// toFloat64
-// ============================================================
-
-func TestToFloat64_Int(t *testing.T) {
-	if v := toFloat64(int(42)); v != 42.0 {
-		t.Errorf("expected 42.0, got %v", v)
-	}
-}
-
-func TestToFloat64_Int64(t *testing.T) {
-	if v := toFloat64(int64(99)); v != 99.0 {
-		t.Errorf("expected 99.0, got %v", v)
-	}
-}
-
-func TestToFloat64_Default(t *testing.T) {
-	if v := toFloat64("not-a-number"); v != 0 {
-		t.Errorf("expected 0 for non-number, got %v", v)
-	}
-}
-
-// ============================================================
-// extractString edge cases
-// ============================================================
-
-func TestExtractString_NonStringValue(t *testing.T) {
-	m := map[string]interface{}{
-		"a": map[string]interface{}{"b": 42},
-	}
-	if s := extractString(m, "a", "b"); s != "" {
-		t.Errorf("expected empty for non-string, got %q", s)
 	}
 }

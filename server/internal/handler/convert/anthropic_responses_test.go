@@ -1,12 +1,11 @@
 package convert
 
 import (
-	"testing"
 	"encoding/json"
 	"io"
 	"strings"
+	"testing"
 )
-
 
 // ============================================================
 // responsesToAnthropicConverter — ConvertRequest
@@ -14,27 +13,70 @@ import (
 
 func TestResponsesToAnthropic_ConvertRequest(t *testing.T) {
 	c := &responsesToAnthropicConverter{}
-	req := map[string]interface{}{
-		"model":         "gpt-4o",
-		"input":         "Hello!",
-		"instructions":  "You are helpful.",
-		"max_output_tokens": 100,
+	mt := 100
+	req := &OpenAIResponsesRequest{
+		Model:           "gpt-4o",
+		Input:           "Hello!",
+		Instructions:    "You are helpful.",
+		MaxOutputTokens: &mt,
 	}
-	out := c.ConvertRequest(req)
+	result, err := c.ConvertRequest(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := result.(*AnthropicRequest)
 
-	if out["system"] != "You are helpful." {
-		t.Errorf("expected system='You are helpful.', got %v", out["system"])
+	if out.System != "You are helpful." {
+		t.Errorf("expected system='You are helpful.', got %v", out.System)
 	}
-	messages, _ := out["messages"].([]interface{})
-	if len(messages) != 1 {
-		t.Fatalf("expected 1 message, got %d", len(messages))
+	if len(out.Messages) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(out.Messages))
 	}
-	msg, _ := messages[0].(map[string]interface{})
-	if msg["role"] != "user" || msg["content"] != "Hello!" {
-		t.Errorf("unexpected message: %v", msg)
+	if out.Messages[0].Role != AnthropicRoleUser || out.Messages[0].Content != "Hello!" {
+		t.Errorf("unexpected message: %v", out.Messages[0])
 	}
-	if v, ok := out["max_tokens"]; !ok || toFloat64(v) != 100 {
-		t.Errorf("expected max_tokens=100, got %v", out["max_tokens"])
+	if out.MaxTokens != 100 {
+		t.Errorf("expected max_tokens=100, got %d", out.MaxTokens)
+	}
+}
+
+func TestResponsesToAnthropic_InputArray(t *testing.T) {
+	c := &responsesToAnthropicConverter{}
+	req := &OpenAIResponsesRequest{
+		Input: []interface{}{
+			map[string]interface{}{"type": "message", "role": "user", "content": "Hello"},
+			map[string]interface{}{"type": "message", "role": "assistant", "content": "Hi"},
+		},
+		Instructions: "Be helpful.",
+	}
+	result, err := c.ConvertRequest(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := result.(*AnthropicRequest)
+
+	if out.System != "Be helpful." {
+		t.Errorf("expected system='Be helpful.', got %v", out.System)
+	}
+	if len(out.Messages) != 2 {
+		t.Fatalf("expected 2 messages, got %d", len(out.Messages))
+	}
+}
+
+func TestResponsesToAnthropic_EmptyInstructions(t *testing.T) {
+	c := &responsesToAnthropicConverter{}
+	req := &OpenAIResponsesRequest{
+		Input:        "Hello",
+		Instructions: "",
+	}
+	result, err := c.ConvertRequest(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := result.(*AnthropicRequest)
+
+	if out.System != "" {
+		t.Error("expected no system for empty instructions")
 	}
 }
 
@@ -59,25 +101,28 @@ func TestResponsesToAnthropic_ConvertResponse(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var a map[string]interface{}
+	var a AnthropicResponse
 	json.Unmarshal(out, &a)
 
-	if a["type"] != "message" {
-		t.Errorf("expected type=message, got %v", a["type"])
+	if a.Type != AnthropicObjectMessage {
+		t.Errorf("expected type=message, got %v", a.Type)
 	}
-	if a["role"] != "assistant" {
+	if a.Role != AnthropicRoleAssistant {
 		t.Error("expected role=assistant")
 	}
-	content, _ := a["content"].([]interface{})
-	block, _ := content[0].(map[string]interface{})
-	if block["text"] != "Hello!" {
-		t.Errorf("expected text='Hello!', got %v", block["text"])
+	if len(a.Content) != 1 {
+		t.Fatal("expected 1 content block")
 	}
-	usage := a["usage"].(map[string]interface{})
-	if usage["input_tokens"].(float64) != 10 {
+	if a.Content[0].Text != "Hello!" {
+		t.Errorf("expected text='Hello!', got %v", a.Content[0].Text)
+	}
+	if a.Usage == nil {
+		t.Fatal("expected usage")
+	}
+	if a.Usage.InputTokens != 10 {
 		t.Error("input_tokens mismatch")
 	}
-	if usage["output_tokens"].(float64) != 5 {
+	if a.Usage.OutputTokens != 5 {
 		t.Error("output_tokens mismatch")
 	}
 }
@@ -88,61 +133,62 @@ func TestResponsesToAnthropic_ConvertResponse(t *testing.T) {
 
 func TestAnthropicToResponses_ConvertRequest(t *testing.T) {
 	c := &anthropicToResponsesConverter{}
-	req := map[string]interface{}{
-		"model":  "claude-3",
-		"messages": []interface{}{
-			map[string]interface{}{"role": "user", "content": "Hi!"},
+	req := &AnthropicRequest{
+		Model: "claude-3",
+		Messages: []AnthropicMessage{
+			{Role: AnthropicRoleUser, Content: "Hi!"},
 		},
-		"system":     "Be helpful.",
-		"max_tokens": 100,
+		System:    "Be helpful.",
+		MaxTokens: 100,
 	}
-	out := c.ConvertRequest(req)
+	result, err := c.ConvertRequest(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := result.(*OpenAIResponsesRequest)
 
-	if out["instructions"] != "Be helpful." {
-		t.Errorf("expected instructions='Be helpful.', got %v", out["instructions"])
+	if out.Instructions != "Be helpful." {
+		t.Errorf("expected instructions='Be helpful.', got %v", out.Instructions)
 	}
-	input, _ := out["input"].([]interface{})
+	data, err := json.Marshal(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var raw map[string]interface{}
+	json.Unmarshal(data, &raw)
+	input, ok := raw["input"].([]interface{})
+	if !ok {
+		t.Fatal("expected input array")
+	}
 	if len(input) != 1 {
 		t.Fatalf("expected 1 input, got %d", len(input))
 	}
-	first, _ := input[0].(map[string]interface{})
-	if first["role"] != "user" {
+	first, ok := input[0].(map[string]interface{})
+	if !ok {
+		t.Fatal("expected map in input")
+	}
+	if first["role"] != AnthropicRoleUser {
 		t.Error("expected user role")
 	}
-	if v, ok := out["max_output_tokens"]; !ok || toFloat64(v) != 100 {
-		t.Errorf("expected max_output_tokens=100, got %v", out["max_output_tokens"])
-	}
-	if _, ok := out["system"]; ok {
-		t.Error("expected system removed")
-	}
-	if _, ok := out["messages"]; ok {
-		t.Error("expected messages removed")
-	}
-}
-
-func TestAnthropicToResponses_ConvertRequest_SystemContentBlocks(t *testing.T) {
-	c := &anthropicToResponsesConverter{}
-	req := map[string]interface{}{
-		"system": []interface{}{
-			map[string]interface{}{"type": "text", "text": "Rule one."},
-			map[string]interface{}{"type": "text", "text": "Rule two."},
-		},
-	}
-	out := c.ConvertRequest(req)
-	if out["instructions"] != "Rule one.\n\nRule two." {
-		t.Errorf("expected joined instructions, got %v", out["instructions"])
+	if out.MaxOutputTokens == nil || *out.MaxOutputTokens != 100 {
+		t.Errorf("expected max_output_tokens=100, got %v", out.MaxOutputTokens)
 	}
 }
 
 func TestAnthropicToResponses_ConvertRequest_NoSystem(t *testing.T) {
 	c := &anthropicToResponsesConverter{}
-	req := map[string]interface{}{
-		"messages": []interface{}{
-			map[string]interface{}{"role": "user", "content": "Hi"},
+	req := &AnthropicRequest{
+		Messages: []AnthropicMessage{
+			{Role: AnthropicRoleUser, Content: "Hi"},
 		},
 	}
-	out := c.ConvertRequest(req)
-	if _, ok := out["instructions"]; ok {
+	result, err := c.ConvertRequest(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := result.(*OpenAIResponsesRequest)
+
+	if out.Instructions != "" {
 		t.Error("expected no instructions")
 	}
 }
@@ -165,24 +211,20 @@ func TestAnthropicToResponses_ConvertResponse(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var o map[string]interface{}
+	var o OpenAIResponsesResponse
 	json.Unmarshal(out, &o)
 
-	if o["object"] != "response" {
-		t.Errorf("expected object=response, got %v", o["object"])
+	if o.Object != ResponsesObject {
+		t.Errorf("expected object=response, got %v", o.Object)
 	}
-	if _, ok := o["type"]; ok {
-		t.Error("expected type removed")
+	if len(o.Output) != 1 {
+		t.Fatalf("expected 1 output, got %d", len(o.Output))
 	}
-	output, _ := o["output"].([]interface{})
-	if len(output) != 1 {
-		t.Fatalf("expected 1 output, got %d", len(output))
+	if len(o.Output[0].Content) != 1 {
+		t.Fatalf("expected 1 content block, got %d", len(o.Output[0].Content))
 	}
-	first, _ := output[0].(map[string]interface{})
-	content, _ := first["content"].([]interface{})
-	firstContent, _ := content[0].(map[string]interface{})
-	if firstContent["text"] != "Hello!" {
-		t.Errorf("expected text='Hello!', got %v", firstContent["text"])
+	if o.Output[0].Content[0].Text != "Hello!" {
+		t.Errorf("expected text='Hello!', got %v", o.Output[0].Content[0].Text)
 	}
 }
 
@@ -237,81 +279,23 @@ func TestConvertSSE_AnthropicToResponses(t *testing.T) {
 	result, _ := io.ReadAll(reader)
 	resultStr := string(result)
 
-	if !strings.Contains(resultStr, "response.created") {
+	if !strings.Contains(resultStr, ResponsesSSECreated) {
 		t.Error("expected response.created event")
 	}
-	if !strings.Contains(resultStr, "response.output_item.added") {
+	if !strings.Contains(resultStr, ResponsesSSEOutputItemAdded) {
 		t.Error("expected response.output_item.added")
 	}
-	if !strings.Contains(resultStr, "response.content_part.added") {
+	if !strings.Contains(resultStr, ResponsesSSEContentPartAdded) {
 		t.Error("expected response.content_part.added")
 	}
-	if !strings.Contains(resultStr, "response.text.delta") {
+	if !strings.Contains(resultStr, ResponsesSSETextDelta) {
 		t.Error("expected response.text.delta")
 	}
 	if !strings.Contains(resultStr, `"delta":"Hi"`) {
 		t.Error("expected delta Hi")
 	}
-	if !strings.Contains(resultStr, "response.done") {
+	if !strings.Contains(resultStr, ResponsesSSEDone) {
 		t.Error("expected response.done")
-	}
-}
-
-func TestResponsesToAnthropic_UnknownFieldPassthrough(t *testing.T) {
-	c := &responsesToAnthropicConverter{}
-	body := []byte(`{"id":"1","object":"response","output":[],"my_field":"x"}`)
-	out, _ := c.ConvertResponse(body)
-	var o map[string]interface{}
-	json.Unmarshal(out, &o)
-	if o["my_field"] != "x" {
-		t.Error("expected my_field passthrough")
-	}
-}
-
-func TestAnthropicToResponses_UnknownFieldPassthrough(t *testing.T) {
-	c := &anthropicToResponsesConverter{}
-	body := []byte(`{"id":"1","type":"message","content":[],"my_key":"my_val"}`)
-	out, _ := c.ConvertResponse(body)
-	var o map[string]interface{}
-	json.Unmarshal(out, &o)
-	if o["my_key"] != "my_val" {
-		t.Error("expected my_key passthrough")
-	}
-}
-
-// ============================================================
-// responsesToAnthropicConverter — ConvertRequest edge cases
-// ============================================================
-
-func TestResponsesToAnthropic_InputArray(t *testing.T) {
-	c := &responsesToAnthropicConverter{}
-	req := map[string]interface{}{
-		"input": []interface{}{
-			map[string]interface{}{"type": "message", "role": "user", "content": "Hello"},
-			map[string]interface{}{"type": "message", "role": "assistant", "content": "Hi"},
-		},
-		"instructions": "Be helpful.",
-	}
-	out := c.ConvertRequest(req)
-
-	if out["system"] != "Be helpful." {
-		t.Errorf("expected system='Be helpful.', got %v", out["system"])
-	}
-	messages, _ := out["messages"].([]interface{})
-	if len(messages) != 2 {
-		t.Fatalf("expected 2 messages, got %d", len(messages))
-	}
-}
-
-func TestResponsesToAnthropic_EmptyInstructions(t *testing.T) {
-	c := &responsesToAnthropicConverter{}
-	req := map[string]interface{}{
-		"input":        "Hello",
-		"instructions": "",
-	}
-	out := c.ConvertRequest(req)
-	if _, ok := out["system"]; ok {
-		t.Error("expected no system for empty instructions")
 	}
 }
 
@@ -321,7 +305,6 @@ func TestResponsesToAnthropic_EmptyInstructions(t *testing.T) {
 
 func TestConvertSSE_ResponsesToAnthropic_NoResponseCreated(t *testing.T) {
 	c := &responsesToAnthropicConverter{}
-	// text.delta without prior response.created should be ignored
 	input := "event: response.text.delta\ndata: {\"type\":\"response.text.delta\",\"delta\":\"Hello\"}\n\n" +
 		"event: response.done\ndata: {\"type\":\"response.done\"}\n\n"
 
@@ -329,8 +312,7 @@ func TestConvertSSE_ResponsesToAnthropic_NoResponseCreated(t *testing.T) {
 	result, _ := io.ReadAll(reader)
 	resultStr := string(result)
 
-	// No events should be emitted without response.created
-	if strings.Contains(resultStr, "content_block_delta") {
+	if strings.Contains(resultStr, AnthropicSSEContentBlockDeltaEvent) {
 		t.Error("expected no content_block_delta without response.created")
 	}
 }

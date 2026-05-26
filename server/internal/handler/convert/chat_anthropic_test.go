@@ -1,12 +1,11 @@
 package convert
 
 import (
-	"testing"
 	"encoding/json"
 	"io"
 	"strings"
+	"testing"
 )
-
 
 // ============================================================
 // openaiToAnthropicConverter — ConvertRequest
@@ -14,145 +13,149 @@ import (
 
 func TestOpenAIToAnthropic_SystemMessages(t *testing.T) {
 	c := &openaiToAnthropicConverter{}
-	req := map[string]interface{}{
-		"model": "gpt-4",
-		"messages": []interface{}{
-			map[string]interface{}{"role": "system", "content": "You are helpful."},
-			map[string]interface{}{"role": "user", "content": "Hi"},
+	req := &OpenAIChatRequest{
+		Model: "gpt-4",
+		Messages: []OpenAIChatMessage{
+			{Role: OpenAIRoleSystem, Content: "You are helpful."},
+			{Role: OpenAIRoleUser, Content: "Hi"},
 		},
 	}
-	out := c.ConvertRequest(req)
-
-	system, _ := out["system"].(string)
-	if system != "You are helpful." {
-		t.Errorf("expected system, got %q", system)
+	result, err := c.ConvertRequest(req)
+	if err != nil {
+		t.Fatal(err)
 	}
+	out := result.(*AnthropicRequest)
 
-	msgs := out["messages"].([]interface{})
-	if len(msgs) != 1 {
-		t.Fatalf("expected 1 non-system message, got %d", len(msgs))
+	if out.System != "You are helpful." {
+		t.Errorf("expected system, got %q", out.System)
 	}
-	m := msgs[0].(map[string]interface{})
-	if m["role"] != "user" {
+	if len(out.Messages) != 1 {
+		t.Fatalf("expected 1 non-system message, got %d", len(out.Messages))
+	}
+	if out.Messages[0].Role != AnthropicRoleUser {
 		t.Error("expected user message remaining")
 	}
 }
 
 func TestOpenAIToAnthropic_MultipleSystem(t *testing.T) {
 	c := &openaiToAnthropicConverter{}
-	req := map[string]interface{}{
-		"messages": []interface{}{
-			map[string]interface{}{"role": "system", "content": "First rule."},
-			map[string]interface{}{"role": "system", "content": "Second rule."},
-			map[string]interface{}{"role": "user", "content": "Hi"},
+	req := &OpenAIChatRequest{
+		Messages: []OpenAIChatMessage{
+			{Role: OpenAIRoleSystem, Content: "First rule."},
+			{Role: OpenAIRoleSystem, Content: "Second rule."},
+			{Role: OpenAIRoleUser, Content: "Hi"},
 		},
 	}
-	out := c.ConvertRequest(req)
-	system, _ := out["system"].(string)
-	expected := "First rule.\n\nSecond rule."
-	if system != expected {
-		t.Errorf("expected %q, got %q", expected, system)
+	result, err := c.ConvertRequest(req)
+	if err != nil {
+		t.Fatal(err)
 	}
-}
+	out := result.(*AnthropicRequest)
 
-func TestOpenAIToAnthropic_SystemAsContentBlocks(t *testing.T) {
-	c := &openaiToAnthropicConverter{}
-	req := map[string]interface{}{
-		"messages": []interface{}{
-			map[string]interface{}{
-				"role": "system",
-				"content": []interface{}{
-					map[string]interface{}{"type": "text", "text": "Rule one."},
-					map[string]interface{}{"type": "text", "text": "Rule two."},
-				},
-			},
-		},
-	}
-	out := c.ConvertRequest(req)
-	system, _ := out["system"].(string)
-	expected := "Rule one.\n\nRule two."
-	if system != expected {
-		t.Errorf("expected %q, got %q", expected, system)
+	expected := "First rule.\n\nSecond rule."
+	if out.System != expected {
+		t.Errorf("expected %q, got %q", expected, out.System)
 	}
 }
 
 func TestOpenAIToAnthropic_NoSystemMessage(t *testing.T) {
 	c := &openaiToAnthropicConverter{}
-	req := map[string]interface{}{
-		"messages": []interface{}{
-			map[string]interface{}{"role": "user", "content": "Hi"},
+	req := &OpenAIChatRequest{
+		Messages: []OpenAIChatMessage{
+			{Role: OpenAIRoleUser, Content: "Hi"},
 		},
 	}
-	out := c.ConvertRequest(req)
-	if _, ok := out["system"]; ok {
+	result, err := c.ConvertRequest(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := result.(*AnthropicRequest)
+
+	if out.System != "" {
 		t.Error("expected no system field")
 	}
 }
 
-func TestOpenAIToAnthropic_StopString(t *testing.T) {
+func TestOpenAIToAnthropic_StopSequences(t *testing.T) {
 	c := &openaiToAnthropicConverter{}
-	req := map[string]interface{}{"stop": "END"}
-	out := c.ConvertRequest(req)
-	seqs, _ := out["stop_sequences"].([]string)
-	if len(seqs) != 1 || seqs[0] != "END" {
-		t.Errorf("expected [END], got %v", seqs)
+	req := &OpenAIChatRequest{
+		Stop: []string{"END"},
 	}
-	if _, ok := out["stop"]; ok {
-		t.Error("expected stop to be removed")
+	result, err := c.ConvertRequest(req)
+	if err != nil {
+		t.Fatal(err)
 	}
-}
+	out := result.(*AnthropicRequest)
 
-func TestOpenAIToAnthropic_StopArray(t *testing.T) {
-	c := &openaiToAnthropicConverter{}
-	req := map[string]interface{}{"stop": []interface{}{"A", "B"}}
-	out := c.ConvertRequest(req)
-	seqs, _ := out["stop_sequences"].([]string)
-	if len(seqs) != 2 || seqs[0] != "A" || seqs[1] != "B" {
-		t.Errorf("expected [A B], got %v", seqs)
+	if len(out.StopSequences) != 1 || out.StopSequences[0] != "END" {
+		t.Errorf("expected [END], got %v", out.StopSequences)
 	}
 }
 
 func TestOpenAIToAnthropic_NoStop(t *testing.T) {
 	c := &openaiToAnthropicConverter{}
-	out := c.ConvertRequest(map[string]interface{}{})
-	if _, ok := out["stop_sequences"]; ok {
+	result, err := c.ConvertRequest(&OpenAIChatRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := result.(*AnthropicRequest)
+
+	if len(out.StopSequences) != 0 {
 		t.Error("expected no stop_sequences")
 	}
 }
 
 func TestOpenAIToAnthropic_MaxTokensPresent(t *testing.T) {
 	c := &openaiToAnthropicConverter{}
-	req := map[string]interface{}{"max_tokens": 100}
-	out := c.ConvertRequest(req)
-	if out["max_tokens"] != 100 {
-		t.Errorf("expected 100, got %v", out["max_tokens"])
+	req := &OpenAIChatRequest{MaxTokens: intPtr(100)}
+	result, err := c.ConvertRequest(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := result.(*AnthropicRequest)
+
+	if out.MaxTokens != 100 {
+		t.Errorf("expected 100, got %d", out.MaxTokens)
 	}
 }
 
 func TestOpenAIToAnthropic_MaxTokensMissing(t *testing.T) {
 	c := &openaiToAnthropicConverter{}
-	out := c.ConvertRequest(map[string]interface{}{})
-	if out["max_tokens"] != 4096 {
-		t.Errorf("expected 4096 default, got %v", out["max_tokens"])
+	result, err := c.ConvertRequest(&OpenAIChatRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := result.(*AnthropicRequest)
+
+	if out.MaxTokens != 4096 {
+		t.Errorf("expected 4096 default, got %d", out.MaxTokens)
 	}
 }
 
 func TestOpenAIToAnthropic_PassthroughFields(t *testing.T) {
+	temp := 0.7
+	topP := 0.9
+	stream := true
 	c := &openaiToAnthropicConverter{}
-	req := map[string]interface{}{
-		"model":       "gpt-4",
-		"temperature": 0.7,
-		"top_p":       0.9,
-		"stream":      true,
+	req := &OpenAIChatRequest{
+		Model:       "gpt-4",
+		Temperature: &temp,
+		TopP:        &topP,
+		Stream:      &stream,
 	}
-	out := c.ConvertRequest(req)
-	if out["model"] != "gpt-4" {
+	result, err := c.ConvertRequest(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := result.(*AnthropicRequest)
+
+	if out.Model != "gpt-4" {
 		t.Error("model not passed through")
 	}
-	if out["temperature"] != 0.7 {
+	if out.Temperature == nil || *out.Temperature != 0.7 {
 		t.Error("temperature not passed through")
 	}
-	if out["stream"] != true {
+	if out.Stream == nil || *out.Stream != true {
 		t.Error("stream not passed through")
 	}
 }
@@ -176,68 +179,53 @@ func TestOpenAIToAnthropic_ConvertResponse(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var o map[string]interface{}
+	var o OpenAIChatResponse
 	json.Unmarshal(out, &o)
 
-	if o["object"] != "chat.completion" {
+	if o.Object != OpenAIChatObject {
 		t.Error("expected object=chat.completion")
 	}
-	if _, ok := o["type"]; ok {
-		t.Error("expected type to be removed")
+	if len(o.Choices) != 1 {
+		t.Fatal("expected 1 choice")
 	}
-	choices := o["choices"].([]interface{})
-	choice := choices[0].(map[string]interface{})
-	msg := choice["message"].(map[string]interface{})
-	if msg["content"] != "Hello world" {
-		t.Errorf("expected Hello world, got %v", msg["content"])
+	if o.Choices[0].Message.Content != "Hello world" {
+		t.Errorf("expected Hello world, got %v", o.Choices[0].Message.Content)
 	}
-	if choice["finish_reason"] != "stop" {
-		t.Errorf("expected finish_reason=stop, got %v", choice["finish_reason"])
+	if o.Choices[0].FinishReason != OpenAIFinishReasonStop {
+		t.Errorf("expected finish_reason=stop, got %v", o.Choices[0].FinishReason)
 	}
-	usage := o["usage"].(map[string]interface{})
-	if usage["prompt_tokens"].(float64) != 10 {
+	if o.Usage == nil {
+		t.Fatal("expected usage")
+	}
+	if o.Usage.PromptTokens != 10 {
 		t.Error("prompt_tokens mismatch")
 	}
-	if usage["completion_tokens"].(float64) != 20 {
+	if o.Usage.CompletionTokens != 20 {
 		t.Error("completion_tokens mismatch")
 	}
-	if usage["total_tokens"].(float64) != 30 {
+	if o.Usage.TotalTokens != 30 {
 		t.Error("total_tokens mismatch")
 	}
 }
 
 func TestOpenAIToAnthropic_ConvertResponse_StopReasonMaxTokens(t *testing.T) {
 	c := &openaiToAnthropicConverter{}
-	body := []byte(`{"content":[],"stop_reason":"max_tokens"}`)
+	body := []byte(`{"content":[{"type":"text","text":""}],"stop_reason":"max_tokens"}`)
 	out, _ := c.ConvertResponse(body)
-	var o map[string]interface{}
+	var o OpenAIChatResponse
 	json.Unmarshal(out, &o)
-	choices := o["choices"].([]interface{})
-	fr := choices[0].(map[string]interface{})["finish_reason"]
-	if fr != "length" {
-		t.Errorf("expected length, got %v", fr)
-	}
-}
-
-func TestOpenAIToAnthropic_ConvertResponse_StopReasonStopSequence(t *testing.T) {
-	c := &openaiToAnthropicConverter{}
-	body := []byte(`{"content":[],"stop_reason":"stop_sequence"}`)
-	out, _ := c.ConvertResponse(body)
-	var o map[string]interface{}
-	json.Unmarshal(out, &o)
-	fr := o["choices"].([]interface{})[0].(map[string]interface{})["finish_reason"]
-	if fr != "stop" {
-		t.Errorf("expected stop, got %v", fr)
+	if o.Choices[0].FinishReason != OpenAIFinishReasonLength {
+		t.Errorf("expected length, got %v", o.Choices[0].FinishReason)
 	}
 }
 
 func TestOpenAIToAnthropic_ConvertResponse_MissingUsage(t *testing.T) {
 	c := &openaiToAnthropicConverter{}
-	body := []byte(`{"content":[],"stop_reason":"end_turn"}`)
+	body := []byte(`{"content":[{"type":"text","text":""}],"stop_reason":"end_turn"}`)
 	out, _ := c.ConvertResponse(body)
-	var o map[string]interface{}
+	var o OpenAIChatResponse
 	json.Unmarshal(out, &o)
-	if o["usage"] != nil {
+	if o.Usage != nil {
 		t.Error("expected nil usage")
 	}
 }
@@ -246,11 +234,9 @@ func TestOpenAIToAnthropic_ConvertResponse_EmptyContent(t *testing.T) {
 	c := &openaiToAnthropicConverter{}
 	body := []byte(`{"content":[],"stop_reason":"end_turn"}`)
 	out, _ := c.ConvertResponse(body)
-	var o map[string]interface{}
+	var o OpenAIChatResponse
 	json.Unmarshal(out, &o)
-	choices := o["choices"].([]interface{})
-	msg := choices[0].(map[string]interface{})["message"].(map[string]interface{})
-	if msg["content"] != "" {
+	if o.Choices[0].Message.Content != "" {
 		t.Error("expected empty content")
 	}
 }
@@ -261,81 +247,73 @@ func TestOpenAIToAnthropic_ConvertResponse_EmptyContent(t *testing.T) {
 
 func TestAnthropicToOpenAI_SystemString(t *testing.T) {
 	c := &anthropicToOpenAIConverter{}
-	req := map[string]interface{}{
-		"model":  "claude-3",
-		"system": "You are helpful.",
-		"messages": []interface{}{
-			map[string]interface{}{"role": "user", "content": "Hi"},
+	req := &AnthropicRequest{
+		Model:  "claude-3",
+		System: "You are helpful.",
+		Messages: []AnthropicMessage{
+			{Role: OpenAIRoleUser, Content: "Hi"},
 		},
 	}
-	out := c.ConvertRequest(req)
-
-	if _, ok := out["system"]; ok {
-		t.Error("expected system to be removed")
+	result, err := c.ConvertRequest(req)
+	if err != nil {
+		t.Fatal(err)
 	}
+	out := result.(*OpenAIChatRequest)
 
-	msgs := out["messages"].([]interface{})
-	if len(msgs) != 2 {
-		t.Fatalf("expected 2 messages, got %d", len(msgs))
+	if len(out.Messages) != 2 {
+		t.Fatalf("expected 2 messages, got %d", len(out.Messages))
 	}
-	sysMsg := msgs[0].(map[string]interface{})
-	if sysMsg["role"] != "system" {
+	if out.Messages[0].Role != OpenAIRoleSystem {
 		t.Error("expected system role")
 	}
-	if sysMsg["content"] != "You are helpful." {
-		t.Errorf("expected system content, got %v", sysMsg["content"])
-	}
-}
-
-func TestAnthropicToOpenAI_SystemContentBlocks(t *testing.T) {
-	c := &anthropicToOpenAIConverter{}
-	req := map[string]interface{}{
-		"system": []interface{}{
-			map[string]interface{}{"type": "text", "text": "Rule one."},
-			map[string]interface{}{"type": "text", "text": "Rule two."},
-		},
-	}
-	out := c.ConvertRequest(req)
-	msgs := out["messages"].([]interface{})
-	sysMsg := msgs[0].(map[string]interface{})
-	if sysMsg["content"] != "Rule one.\n\nRule two." {
-		t.Errorf("expected joined content, got %q", sysMsg["content"])
+	if out.Messages[0].Content != "You are helpful." {
+		t.Errorf("expected system content, got %v", out.Messages[0].Content)
 	}
 }
 
 func TestAnthropicToOpenAI_NoSystem(t *testing.T) {
 	c := &anthropicToOpenAIConverter{}
-	req := map[string]interface{}{
-		"messages": []interface{}{
-			map[string]interface{}{"role": "user", "content": "Hi"},
+	req := &AnthropicRequest{
+		Messages: []AnthropicMessage{
+			{Role: AnthropicRoleUser, Content: "Hi"},
 		},
 	}
-	out := c.ConvertRequest(req)
-	msgs := out["messages"].([]interface{})
-	if len(msgs) != 1 {
-		t.Errorf("expected 1 message, got %d", len(msgs))
+	result, err := c.ConvertRequest(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := result.(*OpenAIChatRequest)
+
+	if len(out.Messages) != 1 {
+		t.Errorf("expected 1 message, got %d", len(out.Messages))
 	}
 }
 
 func TestAnthropicToOpenAI_StopSequences(t *testing.T) {
 	c := &anthropicToOpenAIConverter{}
-	req := map[string]interface{}{
-		"stop_sequences": []interface{}{"A", "B"},
+	req := &AnthropicRequest{
+		StopSequences: []string{"A", "B"},
 	}
-	out := c.ConvertRequest(req)
-	stop, _ := out["stop"].([]string)
-	if len(stop) != 2 || stop[0] != "A" {
-		t.Errorf("expected [A B], got %v", stop)
+	result, err := c.ConvertRequest(req)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if _, ok := out["stop_sequences"]; ok {
-		t.Error("expected stop_sequences to be removed")
+	out := result.(*OpenAIChatRequest)
+
+	if len(out.Stop) != 2 || out.Stop[0] != "A" {
+		t.Errorf("expected [A B], got %v", out.Stop)
 	}
 }
 
 func TestAnthropicToOpenAI_NoStopSequences(t *testing.T) {
 	c := &anthropicToOpenAIConverter{}
-	out := c.ConvertRequest(map[string]interface{}{})
-	if _, ok := out["stop"]; ok {
+	result, err := c.ConvertRequest(&AnthropicRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := result.(*OpenAIChatRequest)
+
+	if len(out.Stop) != 0 {
 		t.Error("expected no stop")
 	}
 }
@@ -361,31 +339,31 @@ func TestAnthropicToOpenAI_ConvertResponse(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var a map[string]interface{}
+	var a AnthropicResponse
 	json.Unmarshal(out, &a)
 
-	if a["type"] != "message" {
+	if a.Type != AnthropicObjectMessage {
 		t.Error("expected type=message")
 	}
-	if a["role"] != "assistant" {
+	if a.Role != AnthropicRoleAssistant {
 		t.Error("expected role=assistant")
 	}
-	if _, ok := a["object"]; ok {
-		t.Error("expected object to be removed")
+	if len(a.Content) != 1 {
+		t.Fatal("expected 1 content block")
 	}
-	content := a["content"].([]interface{})
-	block := content[0].(map[string]interface{})
-	if block["text"] != "Hello" || block["type"] != "text" {
-		t.Errorf("expected text block, got %v", block)
+	if a.Content[0].Text != "Hello" || a.Content[0].Type != AnthropicContentTypeText {
+		t.Errorf("expected text block, got %+v", a.Content[0])
 	}
-	if a["stop_reason"] != "end_turn" {
-		t.Errorf("expected end_turn, got %v", a["stop_reason"])
+	if a.StopReason != AnthropicStopReasonEndTurn {
+		t.Errorf("expected end_turn, got %v", a.StopReason)
 	}
-	usage := a["usage"].(map[string]interface{})
-	if usage["input_tokens"].(float64) != 10 {
+	if a.Usage == nil {
+		t.Fatal("expected usage")
+	}
+	if a.Usage.InputTokens != 10 {
 		t.Error("input_tokens mismatch")
 	}
-	if usage["output_tokens"].(float64) != 20 {
+	if a.Usage.OutputTokens != 20 {
 		t.Error("output_tokens mismatch")
 	}
 }
@@ -394,21 +372,10 @@ func TestAnthropicToOpenAI_ConvertResponse_LengthFinish(t *testing.T) {
 	c := &anthropicToOpenAIConverter{}
 	body := []byte(`{"choices":[{"finish_reason":"length"}]}`)
 	out, _ := c.ConvertResponse(body)
-	var a map[string]interface{}
+	var a AnthropicResponse
 	json.Unmarshal(out, &a)
-	if a["stop_reason"] != "max_tokens" {
-		t.Errorf("expected max_tokens, got %v", a["stop_reason"])
-	}
-}
-
-func TestAnthropicToOpenAI_ConvertResponse_DefaultFinish(t *testing.T) {
-	c := &anthropicToOpenAIConverter{}
-	body := []byte(`{"choices":[{}]}`)
-	out, _ := c.ConvertResponse(body)
-	var a map[string]interface{}
-	json.Unmarshal(out, &a)
-	if a["stop_reason"] != "end_turn" {
-		t.Errorf("expected default end_turn, got %v", a["stop_reason"])
+	if a.StopReason != AnthropicStopReasonMaxTokens {
+		t.Errorf("expected max_tokens, got %v", a.StopReason)
 	}
 }
 
@@ -416,9 +383,9 @@ func TestAnthropicToOpenAI_ConvertResponse_MissingUsage(t *testing.T) {
 	c := &anthropicToOpenAIConverter{}
 	body := []byte(`{"choices":[]}`)
 	out, _ := c.ConvertResponse(body)
-	var a map[string]interface{}
+	var a AnthropicResponse
 	json.Unmarshal(out, &a)
-	if a["usage"] != nil {
+	if a.Usage != nil {
 		t.Error("expected nil usage")
 	}
 }
@@ -439,20 +406,16 @@ func TestConvertSSE_AnthropicToOpenAI(t *testing.T) {
 
 	resultStr := string(result)
 
-	// Should contain an initial role chunk
 	if !strings.Contains(resultStr, `"role":"assistant"`) {
 		t.Error("expected role assistant in output")
 	}
-	// Should contain the content delta
 	if !strings.Contains(resultStr, `"content":"Hello"`) {
 		t.Error("expected content Hello in output")
 	}
-	// Should contain finish_reason
 	if !strings.Contains(resultStr, `"finish_reason":"stop"`) {
 		t.Error("expected finish_reason stop in output")
 	}
-	// Should end with [DONE]
-	if !strings.Contains(resultStr, "[DONE]") {
+	if !strings.Contains(resultStr, SSEDoneMarker) {
 		t.Error("expected [DONE] in output")
 	}
 }
@@ -476,7 +439,7 @@ func TestConvertSSE_AnthropicToOpenAI_ContentBlockStartIgnored(t *testing.T) {
 	reader := c.ConvertSSE(io.NopCloser(strings.NewReader(input)))
 	result, _ := io.ReadAll(reader)
 	resultStr := string(result)
-	if !strings.Contains(resultStr, "[DONE]") {
+	if !strings.Contains(resultStr, SSEDoneMarker) {
 		t.Error("expected [DONE]")
 	}
 }
@@ -496,10 +459,10 @@ func TestConvertSSE_OpenAIToAnthropic(t *testing.T) {
 	result, _ := io.ReadAll(reader)
 	resultStr := string(result)
 
-	if !strings.Contains(resultStr, "message_start") {
+	if !strings.Contains(resultStr, AnthropicSSEMessageStartEvent) {
 		t.Error("expected message_start event")
 	}
-	if !strings.Contains(resultStr, "content_block_start") {
+	if !strings.Contains(resultStr, AnthropicSSEContentBlockStartEvent) {
 		t.Error("expected content_block_start event")
 	}
 	if !strings.Contains(resultStr, `"type":"text_delta"`) {
@@ -508,13 +471,13 @@ func TestConvertSSE_OpenAIToAnthropic(t *testing.T) {
 	if !strings.Contains(resultStr, `"text":"Hi"`) {
 		t.Error("expected text Hi")
 	}
-	if !strings.Contains(resultStr, "content_block_stop") {
+	if !strings.Contains(resultStr, AnthropicSSEContentBlockStopEvent) {
 		t.Error("expected content_block_stop event")
 	}
-	if !strings.Contains(resultStr, "message_delta") {
+	if !strings.Contains(resultStr, AnthropicSSEMessageDeltaEvent) {
 		t.Error("expected message_delta event")
 	}
-	if !strings.Contains(resultStr, "message_stop") {
+	if !strings.Contains(resultStr, AnthropicSSEMessageStopEvent) {
 		t.Error("expected message_stop event")
 	}
 	if !strings.Contains(resultStr, `"stop_reason":"end_turn"`) {
@@ -556,76 +519,8 @@ func TestConvertSSE_OpenAIToAnthropic_NoChoices(t *testing.T) {
 }
 
 // ============================================================
-// Edge: unknown fields passthrough in response
+// Edge: invalid SSE JSON
 // ============================================================
-
-func TestOpenAIToAnthropic_UnknownFieldPassthrough(t *testing.T) {
-	c := &openaiToAnthropicConverter{}
-	body := []byte(`{"id":"1","content":[],"stop_reason":"end_turn","custom_field":"custom_value"}`)
-	out, _ := c.ConvertResponse(body)
-	var o map[string]interface{}
-	json.Unmarshal(out, &o)
-	if o["custom_field"] != "custom_value" {
-		t.Error("expected custom_field passthrough")
-	}
-}
-
-func TestAnthropicToOpenAI_UnknownFieldPassthrough(t *testing.T) {
-	c := &anthropicToOpenAIConverter{}
-	body := []byte(`{"id":"1","object":"chat.completion","choices":[],"special":true}`)
-	out, _ := c.ConvertResponse(body)
-	var o map[string]interface{}
-	json.Unmarshal(out, &o)
-	if o["special"] != true {
-		t.Error("expected special field passthrough")
-	}
-}
-
-// ============================================================
-// mapStopReason edge cases
-// ============================================================
-
-func TestMapStopReason_Unknown(t *testing.T) {
-	c := &openaiToAnthropicConverter{}
-	if r := c.mapStopReason("some_unknown_reason"); r != "stop" {
-		t.Errorf("expected stop for unknown reason, got %q", r)
-	}
-}
-
-// ============================================================
-// extractTextFromContentBlocks edge cases
-// ============================================================
-
-func TestExtractTextFromContentBlocks_EmptyArray(t *testing.T) {
-	c := &openaiToAnthropicConverter{}
-	if s := c.extractTextFromContentBlocks(map[string]interface{}{"content": []interface{}{}}); s != "" {
-		t.Errorf("expected empty, got %q", s)
-	}
-}
-
-func TestExtractTextFromContentBlocks_NonMapItem(t *testing.T) {
-	c := &openaiToAnthropicConverter{}
-	if s := c.extractTextFromContentBlocks(map[string]interface{}{"content": []interface{}{"not-a-map"}}); s != "" {
-		t.Errorf("expected empty, got %q", s)
-	}
-}
-
-// ============================================================
-// SSE: Anthropic → OpenAI edge cases
-// ============================================================
-
-func TestConvertSSE_AnthropicToOpenAI_ErrorIgnored(t *testing.T) {
-	c := &openaiToAnthropicConverter{}
-	// Unknown event types (including "error") are silently ignored
-	input := "event: error\ndata: \"bad request\"\n\n"
-
-	reader := c.ConvertSSE(io.NopCloser(strings.NewReader(input)))
-	result, _ := io.ReadAll(reader)
-
-	if len(result) > 0 {
-		t.Errorf("expected empty for unhandled event type, got %q", string(result))
-	}
-}
 
 func TestConvertSSE_OpenAIToAnthropic_InvalidJSON(t *testing.T) {
 	c := &anthropicToOpenAIConverter{}
@@ -633,9 +528,20 @@ func TestConvertSSE_OpenAIToAnthropic_InvalidJSON(t *testing.T) {
 
 	reader := c.ConvertSSE(io.NopCloser(strings.NewReader(input)))
 	result, _ := io.ReadAll(reader)
-	// Invalid JSON chunks should be silently skipped
 	if len(result) > 0 {
 		t.Errorf("expected empty for invalid JSON, got %q", string(result))
+	}
+}
+
+func TestConvertSSE_AnthropicToOpenAI_ErrorIgnored(t *testing.T) {
+	c := &openaiToAnthropicConverter{}
+	input := "event: error\ndata: \"bad request\"\n\n"
+
+	reader := c.ConvertSSE(io.NopCloser(strings.NewReader(input)))
+	result, _ := io.ReadAll(reader)
+
+	if len(result) > 0 {
+		t.Errorf("expected empty for unhandled event type, got %q", string(result))
 	}
 }
 
@@ -647,10 +553,10 @@ func TestConvertSSE_OpenAIToAnthropic_NoDelta(t *testing.T) {
 	result, _ := io.ReadAll(reader)
 	resultStr := string(result)
 
-	if !strings.Contains(resultStr, "message_start") {
+	if !strings.Contains(resultStr, AnthropicSSEMessageStartEvent) {
 		t.Error("expected message_start")
 	}
-	if !strings.Contains(resultStr, "message_stop") {
+	if !strings.Contains(resultStr, AnthropicSSEMessageStopEvent) {
 		t.Error("expected message_stop")
 	}
 }

@@ -2,97 +2,100 @@ package convert
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 )
 
 type responsesToOpenAIConverter struct{}
 
-func (c *responsesToOpenAIConverter) ConvertRequest(req map[string]interface{}) map[string]interface{} {
-	out := copyMap(req,
-		"input",
-		"instructions",
-		"max_output_tokens",
-	)
-
-	if v, ok := req["max_output_tokens"]; ok {
-		out["max_tokens"] = v
+func (c *responsesToOpenAIConverter) ConvertRequest(req any) (any, error) {
+	respReq, ok := req.(*OpenAIResponsesRequest)
+	if !ok {
+		return nil, errors.New("expected *OpenAIResponsesRequest")
 	}
 
-	var messages []interface{}
+	var messages []OpenAIChatMessage
 
-	if instructions, ok := req["instructions"]; ok {
-		if s, ok := instructions.(string); ok && s != "" {
-			messages = append(messages, map[string]interface{}{
-				"role":    "system",
-				"content": s,
-			})
-		}
+	if respReq.Instructions != "" {
+		messages = append(messages, OpenAIChatMessage{
+			Role:    OpenAIRoleSystem,
+			Content: respReq.Instructions,
+		})
 	}
 
-	if input, ok := req["input"]; ok {
-		switch v := input.(type) {
-		case string:
-			messages = append(messages, map[string]interface{}{
-				"role":    "user",
-				"content": v,
-			})
-		case []interface{}:
-			for _, item := range v {
-				if m, ok := item.(map[string]interface{}); ok {
-					if m["type"] == "message" {
-						messages = append(messages, map[string]interface{}{
-							"role":    m["role"],
-							"content": m["content"],
-						})
-					}
+	switch input := respReq.Input.(type) {
+	case string:
+		messages = append(messages, OpenAIChatMessage{
+			Role:    OpenAIRoleUser,
+			Content: input,
+		})
+	case []interface{}:
+		for _, item := range input {
+			if m, ok := item.(map[string]interface{}); ok {
+				if m["type"] == "message" {
+					messages = append(messages, OpenAIChatMessage{
+						Role:    m["role"].(string),
+						Content: m["content"],
+					})
 				}
 			}
 		}
 	}
 
-	out["messages"] = messages
-	return out
+	oaiReq := &OpenAIChatRequest{
+		Model:    respReq.Model,
+		Messages: messages,
+	}
+
+	if respReq.MaxOutputTokens != nil {
+		oaiReq.MaxTokens = respReq.MaxOutputTokens
+	}
+
+	return oaiReq, nil
 }
 
 func (c *responsesToOpenAIConverter) ConvertResponse(body []byte) ([]byte, error) {
-	var resp map[string]interface{}
-	if err := json.Unmarshal(body, &resp); err != nil {
+	var respResp OpenAIResponsesResponse
+	if err := json.Unmarshal(body, &respResp); err != nil {
 		return nil, err
 	}
 
-	out := copyMap(resp,
-		"object",
-		"output",
-		"created_at",
-	)
-
-	out["object"] = "chat.completion"
-
-	if created, ok := resp["created_at"]; ok {
-		out["created"] = created
-	}
-
-	content := extractResponsesContent(resp)
-
-	choice := map[string]interface{}{
-		"index":         0,
-		"finish_reason": "stop",
-		"message": map[string]interface{}{
-			"role":    "assistant",
-			"content": content,
+	oaiResp := OpenAIChatResponse{
+		ID:      respResp.ID,
+		Object:  OpenAIChatObject,
+		Created: respResp.CreatedAt,
+		Model:   respResp.Model,
+		Choices: []OpenAIChatChoice{
+			{
+				Index: 0,
+				FinishReason: OpenAIFinishReasonStop,
+				Message: OpenAIChatMessage{
+					Role:    OpenAIRoleAssistant,
+					Content: extractResponsesText(respResp.Output),
+				},
+			},
 		},
 	}
-	out["choices"] = []map[string]interface{}{choice}
 
-	if u, ok := resp["usage"].(map[string]interface{}); ok {
-		out["usage"] = map[string]interface{}{
-			"prompt_tokens":     toFloat64(u["input_tokens"]),
-			"completion_tokens": toFloat64(u["output_tokens"]),
-			"total_tokens":      toFloat64(u["input_tokens"]) + toFloat64(u["output_tokens"]),
+	if respResp.Usage != nil {
+		oaiResp.Usage = &Usage{
+			PromptTokens:     respResp.Usage.InputTokens,
+			CompletionTokens: respResp.Usage.OutputTokens,
+			TotalTokens:      respResp.Usage.TotalTokens,
 		}
 	}
 
-	return json.Marshal(out)
+	return json.Marshal(oaiResp)
+}
+
+func extractResponsesText(output []ResponsesOutputItem) string {
+	if len(output) == 0 {
+		return ""
+	}
+	if len(output[0].Content) == 0 {
+		return ""
+	}
+	return output[0].Content[0].Text
 }
 
 func (c *responsesToOpenAIConverter) ConvertSSE(r io.ReadCloser) io.ReadCloser {
@@ -100,7 +103,6 @@ func (c *responsesToOpenAIConverter) ConvertSSE(r io.ReadCloser) io.ReadCloser {
 
 	go func() {
 		defer pw.Close()
-		defer r.Close()
 
 		events, errs := ParseSSE(r)
 
@@ -112,79 +114,67 @@ func (c *responsesToOpenAIConverter) ConvertSSE(r io.ReadCloser) io.ReadCloser {
 				}
 
 				switch event.Event {
-				case "response.created":
-					var data map[string]interface{}
-					if err := json.Unmarshal([]byte(event.Data), &data); err != nil {
+				case ResponsesSSECreated:
+					var evt OpenAIResponsesStreamEvent
+					if err := json.Unmarshal([]byte(event.Data), &evt); err != nil {
 						continue
 					}
-					resp, _ := data["response"].(map[string]interface{})
-					chunk := map[string]interface{}{
-						"id":     extractString(data, "response", "id"),
-						"object": "chat.completion.chunk",
-						"model":  extractString(data, "response", "model"),
-						"choices": []map[string]interface{}{
+					chunk := OpenAIChatStreamChunk{
+						ID:     extractStringFromMap(event.Data, "response", "id"),
+						Object: OpenAIChatStreamChunkObject,
+						Model:  extractStringFromMap(event.Data, "response", "model"),
+						Choices: []OpenAIChatStreamChoice{
 							{
-								"index": 0,
-								"delta": map[string]interface{}{
-									"role": "assistant",
-								},
+								Index: 0,
+								Delta: OpenAIChatDelta{Role: OpenAIRoleAssistant},
 							},
 						},
 					}
-					if resp != nil {
-						if c, ok := resp["created_at"]; ok {
-							chunk["created"] = c
-						}
+					if evt.Response != nil {
+						chunk.Created = evt.Response.CreatedAt
 					}
 					writeSSEJSON(pw, "", chunk)
 
-				case "response.text.delta":
-					var data map[string]interface{}
-					if err := json.Unmarshal([]byte(event.Data), &data); err != nil {
+				case ResponsesSSETextDelta:
+					var evt OpenAIResponsesStreamEvent
+					if err := json.Unmarshal([]byte(event.Data), &evt); err != nil {
 						continue
 					}
-					chunk := map[string]interface{}{
-						"object": "chat.completion.chunk",
-						"choices": []map[string]interface{}{
+					chunk := OpenAIChatStreamChunk{
+						Object: OpenAIChatStreamChunkObject,
+						Choices: []OpenAIChatStreamChoice{
 							{
-								"index": 0,
-								"delta": map[string]interface{}{
-									"content": data["delta"],
-								},
+								Index: 0,
+								Delta: OpenAIChatDelta{Content: evt.Delta},
 							},
 						},
 					}
 					writeSSEJSON(pw, "", chunk)
 
-				case "response.done":
-					var data map[string]interface{}
-					if err := json.Unmarshal([]byte(event.Data), &data); err != nil {
+				case ResponsesSSEDone:
+					var evt OpenAIResponsesStreamEvent
+					if err := json.Unmarshal([]byte(event.Data), &evt); err != nil {
 						continue
 					}
-					resp, _ := data["response"].(map[string]interface{})
-					if resp != nil {
-						chunk := map[string]interface{}{
-							"object": "chat.completion.chunk",
-							"choices": []map[string]interface{}{
+					if evt.Response != nil {
+						chunk := OpenAIChatStreamChunk{
+							Object: OpenAIChatStreamChunkObject,
+							Choices: []OpenAIChatStreamChoice{
 								{
-									"index":         0,
-									"delta":         map[string]interface{}{},
-									"finish_reason": "stop",
+									Index:         0,
+									Delta:         OpenAIChatDelta{},
+									FinishReason: OpenAIFinishReasonStop,
 								},
 							},
 						}
-						if usage, ok := resp["usage"].(map[string]interface{}); ok {
-							chunk["usage"] = map[string]interface{}{
-								"prompt_tokens":     toFloat64(usage["input_tokens"]),
-								"completion_tokens": toFloat64(usage["output_tokens"]),
-								"total_tokens":      toFloat64(usage["input_tokens"]) + toFloat64(usage["output_tokens"]),
-							}
+						if evt.Response.Usage != nil {
+							chunk.ID = evt.Response.ID
 						}
 						writeSSEJSON(pw, "", chunk)
 					}
-					WriteSSE(pw, SSEEvent{Data: "[DONE]"})
+					WriteSSE(pw, SSEEvent{Data: SSEDoneMarker})
 
-				case "error":
+				case ResponsesSSEError:
 					writeSSEJSON(pw, "", map[string]interface{}{
 						"error": map[string]interface{}{
 							"message": event.Data,
@@ -205,24 +195,24 @@ func (c *responsesToOpenAIConverter) ConvertSSE(r io.ReadCloser) io.ReadCloser {
 	return pr
 }
 
-// extractResponsesContent extracts the text from a Responses API output.
-func extractResponsesContent(resp map[string]interface{}) string {
-	output, _ := resp["output"].([]interface{})
-	if len(output) == 0 {
+func extractStringFromMap(data string, keys ...string) string {
+	var m map[string]interface{}
+	if err := json.Unmarshal([]byte(data), &m); err != nil {
 		return ""
 	}
-	first, ok := output[0].(map[string]interface{})
-	if !ok {
-		return ""
+	for i, key := range keys {
+		v, ok := m[key]
+		if !ok {
+			return ""
+		}
+		if i == len(keys)-1 {
+			s, _ := v.(string)
+			return s
+		}
+		m, ok = v.(map[string]interface{})
+		if !ok {
+			return ""
+		}
 	}
-	content, _ := first["content"].([]interface{})
-	if len(content) == 0 {
-		return ""
-	}
-	firstContent, ok := content[0].(map[string]interface{})
-	if !ok {
-		return ""
-	}
-	text, _ := firstContent["text"].(string)
-	return text
+	return ""
 }
