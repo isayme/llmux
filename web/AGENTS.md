@@ -1,0 +1,13 @@
+# 技术栈 (React + TailwindCSS)
+- **入口**：`src/main.tsx`
+- **路由**：`src/App.tsx`，基于 `/admin/` 路径
+- **页面**：
+  - `pages/Login.tsx` - 登录页
+  - `pages/Providers.tsx` - Provider 列表
+  - `pages/ApiKeys.tsx` - API Key 列表
+  - `pages/Aliases.tsx` - 别名列表
+- **组件**：`components/Layout.tsx` - 公共布局
+- TailwindCSS v4 使用 `@import "tailwindcss"` 引入
+- 主题通过 CSS 变量实现，存于 `index.css`
+- 主题切换：设置 `data-theme` 属性（`light` 或 `dark`）
+- 构建后需复制到 server 的 dist 目录或通过静态文件服务
