@@ -13,7 +13,7 @@
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "react-router-dom": "^7.18.0",
-    "lucide-react": "^1.24.0",
+    "lucide-react": "^1.25.0",
     "clsx": "^2.1.1",
     "tailwind-merge": "^3.3.0"
   },
@@ -31,7 +31,7 @@
     "tailwindcss": "^4.1.8",
     "@tailwindcss/vite": "^4.1.8",
     "typescript": "~6.0.3",
-    "typescript-eslint": "^8.64.0",
+    "typescript-eslint": "^8.65.0",
     "vite": "^8.1.0"
   }
 }
