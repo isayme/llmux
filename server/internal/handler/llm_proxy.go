@@ -147,6 +147,7 @@ func (h *ProxyHandler) handleProxy(c *gin.Context) {
 	resolveSpan.End()
 
 	isStream, err := isStream(rawMap)
+	attemptCount := 0
 	if err != nil {
 		c.Error(BadRequest.WithMessage("get stream failed", err))
 		return
@@ -193,7 +194,8 @@ func (h *ProxyHandler) handleProxy(c *gin.Context) {
 		// Log provider call start
 		var providerCall *llmuxlog.ProviderCall
 		if requestLog != nil {
-			providerCall, logErr = h.logService.LogProviderCallStart(requestLog.ID, providerId, provider.Type, model, forwardBytes, !canRetry)
+			attemptCount++
+		providerCall, logErr = h.logService.LogProviderCallStart(requestLog.ID, providerId, provider.Type, model, forwardBytes, attemptCount > 1)
 			if logErr != nil {
 				slog.Error("Failed to log provider call start", "error", logErr)
 			}
