@@ -13,6 +13,10 @@ providers:
   #   base_url: "https://api.example.com/v1"
   #   type: openai
   #   enabled: true
+  #   retry:
+  #     on_429: true
+  #     on_4xx: false
+  #     on_5xx: true
 
 aliases:
   # example:
