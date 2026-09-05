@@ -35,6 +35,21 @@ func SetupRouter(r *gin.Engine, logService *log.Service) {
 		g.POST("/aliases", handler.ListAliases)
 	}
 
+	// logs
+	{
+		g := r.Group("/api/logs")
+		g.Use(handler.InternalErrorHandler())
+		g.Use(handler.SessionMiddleware())
+		g.Use(handler.SessionValidationMiddleware())
+
+		logHandler := log.NewHandler(logService)
+
+		g.GET("/requests", logHandler.ListRequestLogs)
+		g.GET("/requests/:id", logHandler.GetRequestLog)
+		g.GET("/requests/:id/calls", logHandler.GetProviderCalls)
+		g.DELETE("/requests", logHandler.DeleteLogs)
+	}
+
 	// openai
 	{
 		g := r.Group("/v1")
