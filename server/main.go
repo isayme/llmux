@@ -3,12 +3,14 @@ package main
 import (
 	"context"
 	"fmt"
-	"llmux/internal"
-	"llmux/internal/config"
-	"llmux/internal/trace"
 	"log/slog"
 	"os"
 	"time"
+
+	"llmux/internal"
+	"llmux/internal/config"
+	"llmux/internal/log"
+	"llmux/internal/trace"
 
 	"github.com/gin-gonic/gin"
 )
@@ -46,8 +48,27 @@ func main() {
 		ForceOnLatency: forceLatency,
 	})
 
+	// Initialize logging
+	loggingCfg := config.Get().Logging
+	logStore, err := log.NewStore(loggingCfg.DBPath)
+	if err != nil {
+		slog.Error("Failed to initialize log store", "error", err)
+		return
+	}
+	defer logStore.Close()
+
+	logService := log.NewService(logStore)
+
+	// Start cleaner if logging is enabled
+	if loggingCfg.Enabled {
+		cleanInterval, _ := time.ParseDuration(loggingCfg.CleanInterval)
+		cleaner := log.NewCleaner(logService, loggingCfg.RetentionDays)
+		cleaner.Start(cleanInterval)
+		defer cleaner.Stop()
+	}
+
 	r := gin.Default()
-	internal.SetupRouter(r)
+	internal.SetupRouter(r, logService)
 
 	addr := fmt.Sprintf(":%d", config.Get().Server.Port)
 

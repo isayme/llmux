@@ -7,17 +7,21 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"llmux/internal/config"
-	"llmux/internal/strategy"
-	"llmux/internal/trace"
-	"llmux/internal/util"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"llmux/internal/config"
+	llmuxlog "llmux/internal/log"
+	"llmux/internal/strategy"
+	"llmux/internal/trace"
+	"llmux/internal/util"
+
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/patrickmn/go-cache"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/otel/attribute"
@@ -42,11 +46,13 @@ var anthropicVersion = "2023-06-01"
 type ProxyHandler struct {
 	selectorMu    sync.Mutex
 	selectorCache *cache.Cache
+	logService    *llmuxlog.Service
 }
 
-func NewProxyHandler() *ProxyHandler {
+func NewProxyHandler(logService *llmuxlog.Service) *ProxyHandler {
 	return &ProxyHandler{
 		selectorCache: cache.New(10*time.Minute, 5*time.Minute),
+		logService:    logService,
 	}
 }
 
@@ -109,6 +115,26 @@ func (h *ProxyHandler) handleProxy(c *gin.Context) {
 	trace.SetAttributes(parseSpan, attribute.String("model", rawModel))
 	parseSpan.End()
 
+	// Start logging
+	requestID := uuid.New().String()
+	apiKeyID := GetAPIKey(c)
+	requestLog, logErr := h.logService.StartRequest(requestID, rawModel, rawModel, c.Request.Method, c.Request.URL.Path, bodyBytes, c.ClientIP(), apiKeyID)
+	if logErr != nil {
+		// Log error but don't fail the request
+		slog.Error("Failed to create request log", "error", logErr)
+	}
+	defer func() {
+		if requestLog != nil {
+			status := "success"
+			if c.Writer.Status() >= 400 {
+				status = "failed"
+			}
+			if err := h.logService.CompleteRequest(requestLog, status); err != nil {
+				slog.Error("Failed to complete request log", "error", err)
+			}
+		}
+	}()
+
 	_, resolveSpan := trace.StartSpan(c.Request.Context(), "resolve alias")
 	selector, err := h.resolveModelSelector(c, rawModel)
 	if err != nil {
@@ -164,7 +190,41 @@ func (h *ProxyHandler) handleProxy(c *gin.Context) {
 
 		forwardPath := getProviderPath(provider.Type)
 
+		// Log provider call start
+		providerCall, logErr := h.logService.LogProviderCallStart(requestLog.ID, providerId, provider.Type, model, forwardBytes, !canRetry)
+		if logErr != nil {
+			slog.Error("Failed to log provider call start", "error", logErr)
+		}
+		callStart := time.Now()
+
 		resp, err := forwardRequest(c.Request.Context(), getHttpClient(isStream), provider, c.Request.Method, forwardPath, c.Request.Header, forwardBytes)
+		callDuration := time.Since(callStart).Milliseconds()
+
+		// Log provider call end
+		if providerCall != nil {
+			if err != nil {
+				if logErr := h.logService.LogProviderCallEnd(providerCall, 0, nil, nil, callDuration, err); logErr != nil {
+					slog.Error("Failed to log provider call end", "error", logErr)
+				}
+			} else {
+				// Read response body for logging (but don't consume it for streaming)
+				var respBody []byte
+				if !isStream && resp.Body != nil {
+					respBody, _ = io.ReadAll(resp.Body)
+					resp.Body.Close()
+					// Re-create reader for downstream use
+					resp.Body = io.NopCloser(bytes.NewReader(respBody))
+				}
+
+				// Convert response headers to JSON
+				headerJSON, _ := json.Marshal(resp.Header)
+
+				if logErr := h.logService.LogProviderCallEnd(providerCall, resp.StatusCode, headerJSON, respBody, callDuration, nil); logErr != nil {
+					slog.Error("Failed to log provider call end", "error", logErr)
+				}
+			}
+		}
+
 		if err != nil {
 			if canRetry {
 				continue
