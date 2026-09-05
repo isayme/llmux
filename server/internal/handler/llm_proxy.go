@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"llmux/internal/config"
-	"llmux/internal/handler/convert"
 	"llmux/internal/strategy"
 	"llmux/internal/trace"
 	"llmux/internal/util"
@@ -51,15 +50,15 @@ func NewProxyHandler() *ProxyHandler {
 }
 
 func (h *ProxyHandler) ChatCompletionsHandler(c *gin.Context) {
-	h.handleProxy(c, convert.ProtocolOpenAI)
+	h.handleProxy(c)
 }
 
 func (h *ProxyHandler) AnthropicMessagesHandler(c *gin.Context) {
-	h.handleProxy(c, convert.ProtocolAnthropic)
+	h.handleProxy(c)
 }
 
 func (h *ProxyHandler) ResponsesHandler(c *gin.Context) {
-	h.handleProxy(c, convert.ProtocolOpenAIResponses)
+	h.handleProxy(c)
 }
 
 func (h *ProxyHandler) ListModelsHandler(c *gin.Context) {
@@ -85,7 +84,7 @@ func (h *ProxyHandler) ListModelsHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, resp)
 }
 
-func (h *ProxyHandler) handleProxy(c *gin.Context, usedProtocol convert.UsedAIProtocol) {
+func (h *ProxyHandler) handleProxy(c *gin.Context) {
 	bodyBytes, err := io.ReadAll(c.Request.Body)
 	if err != nil {
 		c.Error(BadRequest.WithMessage("read req body failed", err))
@@ -154,26 +153,9 @@ func (h *ProxyHandler) handleProxy(c *gin.Context, usedProtocol convert.UsedAIPr
 			return
 		}
 
-		req := buildTypedRequest(bodyBytes, model, usedProtocol)
+		rawMap["model"] = model
 
-		converter := convert.GetConverter(usedProtocol, provider.Type)
-
-		_, convertReqSpan := trace.StartSpan(c.Request.Context(), "convert request")
-		trace.SetAttributes(convertReqSpan,
-			attribute.String("converter", fmt.Sprintf("%T", converter)),
-			attribute.String("from_protocol", usedProtocol.String()),
-			attribute.String("to_provider_type", provider.Type),
-		)
-		forwardBody, err := converter.ConvertRequest(req)
-		if err != nil {
-			trace.SetError(convertReqSpan, err)
-			convertReqSpan.End()
-			c.Error(InternalServerError.WithMessage("convert request failed", err))
-			return
-		}
-		convertReqSpan.End()
-
-		forwardBytes, err := json.Marshal(forwardBody)
+		forwardBytes, err := json.Marshal(rawMap)
 		if err != nil {
 			c.Error(InternalServerError.WithMessage("marshal forward body failed", err))
 			return
@@ -212,10 +194,9 @@ func (h *ProxyHandler) handleProxy(c *gin.Context, usedProtocol convert.UsedAIPr
 
 		if isStream {
 			_, sseSpan := trace.StartSpan(c.Request.Context(), "sse stream")
-			reader := converter.ConvertSSE(resp.Body)
 			copyResponseHeaders(c, resp.Header)
 			c.Status(resp.StatusCode)
-			proxySSE(c, reader)
+			proxySSE(c, resp.Body)
 			sseSpan.End()
 			return
 		}
@@ -226,42 +207,11 @@ func (h *ProxyHandler) handleProxy(c *gin.Context, usedProtocol convert.UsedAIPr
 			return
 		}
 
-		_, convertRespSpan := trace.StartSpan(c.Request.Context(), "convert response")
-		respBody, err = converter.ConvertResponse(respBody)
-		if err != nil {
-			trace.SetError(convertRespSpan, err)
-			convertRespSpan.End()
-			c.Error(InternalServerError.WithMessage("convert response body failed", err))
-			return
-		}
-		convertRespSpan.End()
-
 		copyResponseHeaders(c, resp.Header)
 		c.Status(resp.StatusCode)
 		c.Writer.Write(respBody)
 		return
 	}
-}
-
-func buildTypedRequest(bodyBytes []byte, model string, usedProtocol convert.UsedAIProtocol) any {
-	switch usedProtocol {
-	case convert.ProtocolOpenAI:
-		var req convert.OpenAIChatRequest
-		json.Unmarshal(bodyBytes, &req)
-		req.Model = model
-		return &req
-	case convert.ProtocolAnthropic:
-		var req convert.AnthropicRequest
-		json.Unmarshal(bodyBytes, &req)
-		req.Model = model
-		return &req
-	case convert.ProtocolOpenAIResponses:
-		var req convert.OpenAIResponsesRequest
-		json.Unmarshal(bodyBytes, &req)
-		req.Model = model
-		return &req
-	}
-	return nil
 }
 
 // resolveModelSelector resolves a model name or alias to a ModelSelector.
