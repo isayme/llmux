@@ -33,6 +33,12 @@ api_keys:
   #   key: ""
   #   enabled: true
 
+logging:
+  enabled: true
+  retention_days: 7
+  clean_interval: "1h"
+  db_path: "/app/llmux.db"
+
 trace:
   enabled: false
   exporter: stdout

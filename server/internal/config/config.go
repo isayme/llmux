@@ -100,6 +100,21 @@ type ModelAlias struct {
 	Retry *RetryConfig `json:"retry" mapstructure:"retry"`
 }
 
+// LoggingConfig logging configuration
+type LoggingConfig struct {
+	// Enabled enable request logging
+	Enabled bool `json:"enabled" mapstructure:"enabled"`
+
+	// RetentionDays number of days to retain logs
+	RetentionDays int `json:"retention_days" mapstructure:"retention_days"`
+
+	// CleanInterval interval for cleaning old logs
+	CleanInterval string `json:"clean_interval" mapstructure:"clean_interval"`
+
+	// DBPath path to SQLite database file
+	DBPath string `json:"db_path" mapstructure:"db_path"`
+}
+
 // TraceConfig trace configuration
 type TraceConfig struct {
 	Enabled  bool           `json:"enabled" mapstructure:"enabled"`
@@ -124,7 +139,9 @@ type Config struct {
 
 	APIKeys []*ApiKeyConfig `json:"api_keys" mapstructure:"api_keys"`
 
-	Trace TraceConfig `json:"trace" mapstructure:"trace"`
+	Trace   TraceConfig   `json:"trace" mapstructure:"trace"`
+
+	Logging LoggingConfig `json:"logging" mapstructure:"logging"`
 }
 
 var globalConfig *Config
@@ -138,6 +155,11 @@ func LoadConfig() error {
 	viper.SetDefault("server.port", "8080")
 	viper.SetDefault("server.session.cookie_name", "llmux_sid")
 	viper.SetDefault("server.session.max_age", 86400)
+
+	viper.SetDefault("logging.enabled", true)
+	viper.SetDefault("logging.retention_days", 7)
+	viper.SetDefault("logging.clean_interval", "1h")
+	viper.SetDefault("logging.db_path", "./llmux.db")
 
 	if err := viper.ReadInConfig(); err != nil {
 		slog.Info("read config failed", "err", err)
