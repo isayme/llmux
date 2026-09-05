@@ -74,8 +74,8 @@ func (s *Store) GetRequestLogs(page, pageSize int, filters map[string]interface{
 	if status, ok := filters["status"]; ok {
 		query = query.Where("status = ?", status)
 	}
-	if model, ok := filters["model"]; ok {
-		query = query.Where("model LIKE ?", "%"+model.(string)+"%")
+	if model, ok := filters["model"].(string); ok {
+		query = query.Where("model LIKE ?", "%"+model+"%")
 	}
 	if providerID, ok := filters["provider_id"]; ok {
 		query = query.Where("id IN (SELECT request_log_id FROM provider_calls WHERE provider_id = ?)", providerID)
@@ -114,11 +114,14 @@ func (s *Store) GetProviderCallsByRequestLogID(requestLogID uint) ([]ProviderCal
 // DeleteBefore removes all provider calls and request logs created before the
 // given cutoff time. Returns the number of request logs deleted.
 func (s *Store) DeleteBefore(cutoff time.Time) (int64, error) {
-	result := s.db.Where("created_at < ?", cutoff).Delete(&ProviderCall{})
-	if result.Error != nil {
-		return 0, result.Error
-	}
-
-	result = s.db.Where("created_at < ?", cutoff).Delete(&RequestLog{})
-	return result.RowsAffected, result.Error
+	var deleted int64
+	err := s.db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("created_at < ?", cutoff).Delete(&ProviderCall{}).Error; err != nil {
+			return err
+		}
+		result := tx.Where("created_at < ?", cutoff).Delete(&RequestLog{})
+		deleted = result.RowsAffected
+		return result.Error
+	})
+	return deleted, err
 }
