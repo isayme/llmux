@@ -191,9 +191,12 @@ func (h *ProxyHandler) handleProxy(c *gin.Context) {
 		forwardPath := getProviderPath(provider.Type)
 
 		// Log provider call start
-		providerCall, logErr := h.logService.LogProviderCallStart(requestLog.ID, providerId, provider.Type, model, forwardBytes, !canRetry)
-		if logErr != nil {
-			slog.Error("Failed to log provider call start", "error", logErr)
+		var providerCall *llmuxlog.ProviderCall
+		if requestLog != nil {
+			providerCall, logErr = h.logService.LogProviderCallStart(requestLog.ID, providerId, provider.Type, model, forwardBytes, !canRetry)
+			if logErr != nil {
+				slog.Error("Failed to log provider call start", "error", logErr)
+			}
 		}
 		callStart := time.Now()
 
@@ -210,14 +213,21 @@ func (h *ProxyHandler) handleProxy(c *gin.Context) {
 				// Read response body for logging (but don't consume it for streaming)
 				var respBody []byte
 				if !isStream && resp.Body != nil {
-					respBody, _ = io.ReadAll(resp.Body)
+					var readErr error
+					respBody, readErr = io.ReadAll(resp.Body)
+					if readErr != nil {
+						slog.Warn("Failed to read response body for logging", "error", readErr)
+					}
 					resp.Body.Close()
 					// Re-create reader for downstream use
 					resp.Body = io.NopCloser(bytes.NewReader(respBody))
 				}
 
 				// Convert response headers to JSON
-				headerJSON, _ := json.Marshal(resp.Header)
+				headerJSON, marshalErr := json.Marshal(resp.Header)
+				if marshalErr != nil {
+					slog.Warn("Failed to marshal response headers for logging", "error", marshalErr)
+				}
 
 				if logErr := h.logService.LogProviderCallEnd(providerCall, resp.StatusCode, headerJSON, respBody, callDuration, nil); logErr != nil {
 					slog.Error("Failed to log provider call end", "error", logErr)
