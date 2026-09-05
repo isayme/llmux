@@ -12,6 +12,7 @@ import (
 	"llmux/internal/trace"
 	"llmux/internal/util"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -173,7 +174,12 @@ func (h *ProxyHandler) handleProxy(c *gin.Context) {
 		}
 
 		if resp.StatusCode >= 400 {
-			if canRetry {
+			if shouldRetry(resp.StatusCode, provider, canRetry) {
+				// 429: respect retry-after header
+				if resp.StatusCode == 429 {
+					delay := parseRetryAfter(resp.Header)
+					time.Sleep(delay)
+				}
 				resp.Body.Close()
 				continue
 			}
@@ -348,6 +354,59 @@ func forwardRequest(ctx context.Context, httpClient *http.Client, provider *conf
 
 	upstreamSpan.SetAttributes(attribute.Int("http.status_code", resp.StatusCode))
 	return resp, nil
+}
+
+// shouldRetry determines if the request should be retried based on status code and provider config.
+// Returns true if the request should be retried.
+func shouldRetry(statusCode int, provider *config.ProviderConfig, canRetry bool) bool {
+	if !canRetry {
+		return false
+	}
+
+	// 400/401/403 never retry
+	if statusCode == 400 || statusCode == 401 || statusCode == 403 {
+		return false
+	}
+
+	retryConfig := provider.Retry
+	if retryConfig == nil {
+		return false
+	}
+
+	switch {
+	case statusCode == 429:
+		return retryConfig.On429
+	case statusCode >= 400 && statusCode < 500:
+		return retryConfig.On4xx
+	case statusCode >= 500:
+		return retryConfig.On5xx
+	default:
+		return false
+	}
+}
+
+// parseRetryAfter parses the Retry-After header and returns the delay duration.
+// If the header is missing or invalid, returns 1 second.
+func parseRetryAfter(header http.Header) time.Duration {
+	retryAfter := header.Get("Retry-After")
+	if retryAfter == "" {
+		return 1 * time.Second
+	}
+
+	// Try to parse as seconds
+	if seconds, err := strconv.Atoi(retryAfter); err == nil {
+		return time.Duration(seconds) * time.Second
+	}
+
+	// Try to parse as HTTP date
+	if t, err := http.ParseTime(retryAfter); err == nil {
+		delay := time.Until(t)
+		if delay > 0 {
+			return delay
+		}
+	}
+
+	return 1 * time.Second
 }
 
 func getModel(reqBody map[string]interface{}) (string, error) {
