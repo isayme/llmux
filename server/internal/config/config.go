@@ -26,6 +26,18 @@ type ServerConfig struct {
 	Session *SessionConfig `json:"session" mapstructure:"session"`
 }
 
+// RetryConfig retry configuration for provider
+type RetryConfig struct {
+	// On429 retry on 429 Too Many Requests
+	On429 bool `json:"on_429" mapstructure:"on_429"`
+
+	// On4xx retry on 4xx status codes (except 429, 400, 401, 403)
+	On4xx bool `json:"on_4xx" mapstructure:"on_4xx"`
+
+	// On5xx retry on 5xx status codes
+	On5xx bool `json:"on_5xx" mapstructure:"on_5xx"`
+}
+
 // ProviderConfig provider config
 type ProviderConfig struct {
 	// ID provider id
@@ -45,6 +57,9 @@ type ProviderConfig struct {
 
 	// Enabled provider enabled
 	Enabled bool `json:"enabled" mapstructure:"enabled"`
+
+	// Retry provider retry configuration
+	Retry *RetryConfig `json:"retry" mapstructure:"retry"`
 }
 
 // ApiKeyConfig api key config
@@ -56,6 +71,9 @@ type ApiKeyConfig struct {
 
 	// Enabled api key enabled
 	Enabled bool `json:"enabled" mapstructure:"enabled"`
+
+	// Retry provider retry configuration
+	Retry *RetryConfig `json:"retry" mapstructure:"retry"`
 }
 
 type ModelAliasItemConfig struct {
@@ -77,6 +95,9 @@ type ModelAlias struct {
 
 	// Enabled model alias enabled
 	Enabled bool `json:"enabled" mapstructure:"enabled"`
+
+	// Retry provider retry configuration
+	Retry *RetryConfig `json:"retry" mapstructure:"retry"`
 }
 
 // TraceConfig trace configuration
