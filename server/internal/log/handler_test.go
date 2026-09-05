@@ -44,3 +44,93 @@ func TestListRequestLogs(t *testing.T) {
 		t.Error("Expected data field in response")
 	}
 }
+
+func TestGetRequestLogInvalidID(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	store, err := NewStore(dbPath)
+	if err != nil {
+		t.Fatalf("NewStore failed: %v", err)
+	}
+	defer store.Close()
+
+	svc := NewService(store)
+	handler := NewHandler(svc)
+
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.GET("/logs/requests/:id", handler.GetRequestLog)
+
+	req := httptest.NewRequest("GET", "/logs/requests/invalid", nil)
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	if w.Code != 400 {
+		t.Errorf("Expected status 400, got %d", w.Code)
+	}
+}
+
+func TestGetRequestLogNotFound(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	store, err := NewStore(dbPath)
+	if err != nil {
+		t.Fatalf("NewStore failed: %v", err)
+	}
+	defer store.Close()
+
+	svc := NewService(store)
+	handler := NewHandler(svc)
+
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.GET("/logs/requests/:id", handler.GetRequestLog)
+
+	req := httptest.NewRequest("GET", "/logs/requests/999", nil)
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	if w.Code != 404 {
+		t.Errorf("Expected status 404, got %d", w.Code)
+	}
+}
+
+func TestDeleteLogs(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
+
+	store, err := NewStore(dbPath)
+	if err != nil {
+		t.Fatalf("NewStore failed: %v", err)
+	}
+	defer store.Close()
+
+	svc := NewService(store)
+	handler := NewHandler(svc)
+
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.DELETE("/logs/requests", handler.DeleteLogs)
+
+	req := httptest.NewRequest("DELETE", "/logs/requests?days=7", nil)
+	w := httptest.NewRecorder()
+
+	router.ServeHTTP(w, req)
+
+	if w.Code != 200 {
+		t.Errorf("Expected status 200, got %d", w.Code)
+	}
+
+	var response map[string]interface{}
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatalf("Failed to unmarshal response: %v", err)
+	}
+
+	if _, ok := response["deleted"]; !ok {
+		t.Error("Expected deleted field in response")
+	}
+}
