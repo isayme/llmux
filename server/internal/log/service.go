@@ -17,7 +17,7 @@ func NewService(store *Store) *Service {
 
 // StartRequest creates a new RequestLog entry with status "pending" and
 // persists it via the store. Returns the created RequestLog.
-func (s *Service) StartRequest(requestID, model, alias, method, path string, body []byte, clientIP, apiKeyID string) *RequestLog {
+func (s *Service) StartRequest(requestID, model, alias, method, path string, body []byte, clientIP, apiKeyID string) (*RequestLog, error) {
 	log := &RequestLog{
 		RequestID:   requestID,
 		Timestamp:   time.Now(),
@@ -31,13 +31,15 @@ func (s *Service) StartRequest(requestID, model, alias, method, path string, bod
 		Status:      "pending",
 	}
 
-	s.store.CreateRequestLog(log)
-	return log
+	if err := s.store.CreateRequestLog(log); err != nil {
+		return nil, err
+	}
+	return log, nil
 }
 
 // LogProviderCallStart creates a new ProviderCall entry and persists it.
 // Returns the created ProviderCall.
-func (s *Service) LogProviderCallStart(requestLogID uint, providerID, providerType, model string, requestBody []byte, isRetry bool) *ProviderCall {
+func (s *Service) LogProviderCallStart(requestLogID uint, providerID, providerType, model string, requestBody []byte, isRetry bool) (*ProviderCall, error) {
 	call := &ProviderCall{
 		RequestLogID: requestLogID,
 		ProviderID:   providerID,
@@ -47,12 +49,14 @@ func (s *Service) LogProviderCallStart(requestLogID uint, providerID, providerTy
 		IsRetry:      isRetry,
 	}
 
-	s.store.CreateProviderCall(call)
-	return call
+	if err := s.store.CreateProviderCall(call); err != nil {
+		return nil, err
+	}
+	return call, nil
 }
 
 // LogProviderCallEnd updates an existing ProviderCall with the response details.
-func (s *Service) LogProviderCallEnd(call *ProviderCall, responseCode int, responseHeader, responseBody []byte, duration int64, err error) {
+func (s *Service) LogProviderCallEnd(call *ProviderCall, responseCode int, responseHeader, responseBody []byte, duration int64, err error) error {
 	call.ResponseCode = responseCode
 	call.ResponseHeader = responseHeader
 	call.ResponseBody = responseBody
@@ -61,15 +65,15 @@ func (s *Service) LogProviderCallEnd(call *ProviderCall, responseCode int, respo
 		call.Error = err.Error()
 	}
 
-	s.store.UpdateProviderCall(call)
+	return s.store.UpdateProviderCall(call)
 }
 
 // CompleteRequest marks a RequestLog as completed with the given status
 // and calculates the total duration from when the request was started.
-func (s *Service) CompleteRequest(log *RequestLog, status string) {
+func (s *Service) CompleteRequest(log *RequestLog, status string) error {
 	log.Status = status
 	log.Duration = time.Since(log.Timestamp).Milliseconds()
-	s.store.UpdateRequestLog(log)
+	return s.store.UpdateRequestLog(log)
 }
 
 // GetRequestLogs returns a paginated, filtered list of request logs and total count.
