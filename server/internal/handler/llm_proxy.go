@@ -195,7 +195,7 @@ func (h *ProxyHandler) handleProxy(c *gin.Context) {
 		var providerCall *llmuxlog.ProviderCall
 		if requestLog != nil {
 			attemptCount++
-		providerCall, logErr = h.logService.LogProviderCallStart(requestLog.ID, providerId, provider.Type, model, forwardBytes, attemptCount > 1)
+			providerCall, logErr = h.logService.LogProviderCallStart(requestLog.ID, providerId, provider.Type, model, forwardBytes, attemptCount > 1)
 			if logErr != nil {
 				slog.Error("Failed to log provider call start", "error", logErr)
 			}
