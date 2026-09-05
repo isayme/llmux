@@ -5,6 +5,7 @@ import { APIKeysPage } from '@/pages/APIKeysPage'
 import { AliasesPage } from '@/pages/AliasesPage'
 import { GettingStartedPage } from '@/pages/GettingStartedPage'
 import { LoginPage } from '@/pages/LoginPage'
+import { LogsPage } from '@/pages/LogsPage'
 import { ProvidersPage } from '@/pages/ProvidersPage'
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 
@@ -73,6 +74,7 @@ function AppRoutes() {
         <Route path="providers" element={<ProvidersPage />} />
         <Route path="api-keys" element={<APIKeysPage />} />
         <Route path="aliases" element={<AliasesPage />} />
+        <Route path="logs" element={<LogsPage />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

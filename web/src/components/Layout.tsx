@@ -11,6 +11,7 @@ import {
   Moon,
   Monitor,
   LogOut,
+  FileText,
   Menu,
   X,
   Home,
@@ -23,6 +24,7 @@ const navItems = [
   { to: '/providers', label: 'Providers', icon: Server },
   { to: '/api-keys', label: 'API Keys', icon: Key },
   { to: '/aliases', label: 'Aliases', icon: GitBranch },
+  { to: '/logs', label: 'Logs', icon: FileText },
 ]
 
 export function Layout() {
