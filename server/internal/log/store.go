@@ -125,12 +125,3 @@ func (s *Store) DeleteBefore(cutoff time.Time) (int64, error) {
 	})
 	return deleted, err
 }
-
-// MarkPendingAsInterrupted updates all request logs with status "pending" to "interrupted".
-// This is called on server startup to handle requests that were in-flight when the server restarted.
-func (s *Store) MarkPendingAsInterrupted() (int64, error) {
-	result := s.db.Model(&RequestLog{}).
-		Where("status = ?", "pending").
-		Update("status", "interrupted")
-	return result.RowsAffected, result.Error
-}
