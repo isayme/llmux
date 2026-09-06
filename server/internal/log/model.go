@@ -17,7 +17,8 @@ type RequestLog struct {
 	ClientIP    string    `gorm:"size:50" json:"client_ip"`
 	APIKeyID    string    `gorm:"size:50;index" json:"api_key_id"`
 	Duration    int64     `json:"duration"`
-	Status      string    `gorm:"size:20;index" json:"status"`
+Status      string    `gorm:"size:20;index" json:"status"`
+	ResponseBody []byte    `json:"response_body"`
 	CreatedAt   time.Time `json:"created_at"`
 }
 

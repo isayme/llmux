@@ -55,7 +55,7 @@ func TestLogServiceCompleteRequest(t *testing.T) {
 	// Wait a bit to ensure duration > 0
 	time.Sleep(10 * time.Millisecond)
 
-	if err := svc.CompleteRequest(reqLog, "success"); err != nil {
+	if err := svc.CompleteRequest(reqLog, "success", []byte(`{"result":"ok"}`)); err != nil {
 		t.Fatalf("CompleteRequest failed: %v", err)
 	}
 

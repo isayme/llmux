@@ -70,9 +70,10 @@ func (s *Service) LogProviderCallEnd(call *ProviderCall, responseCode int, respo
 
 // CompleteRequest marks a RequestLog as completed with the given status
 // and calculates the total duration from when the request was started.
-func (s *Service) CompleteRequest(log *RequestLog, status string) error {
+func (s *Service) CompleteRequest(log *RequestLog, status string, responseBody []byte) error {
 	log.Status = status
 	log.Duration = time.Since(log.Timestamp).Milliseconds()
+	log.ResponseBody = responseBody
 	return s.store.UpdateRequestLog(log)
 }
 

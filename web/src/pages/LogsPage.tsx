@@ -4,7 +4,7 @@ import { Badge } from '@/components/ui/Badge'
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/Table'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
-import { FileText, RefreshCw, Trash2, Eye, X, ChevronLeft, ChevronRight } from 'lucide-react'
+import { FileText, RefreshCw, Trash2, Eye, X, ChevronLeft, ChevronRight, ChevronDown, ChevronRight as ChevronRightIcon, Copy, Check } from 'lucide-react'
 
 interface RequestLog {
   id: number
@@ -18,6 +18,8 @@ interface RequestLog {
   api_key_id: string
   duration: number
   status: string
+  request_body?: number[]
+  response_body?: number[]
 }
 
 interface ProviderCall {
@@ -29,6 +31,100 @@ interface ProviderCall {
   duration: number
   is_retry: boolean
   error: string
+  request_body?: number[]
+  response_header?: Record<string, string[]>
+  response_body?: number[]
+}
+
+function bytesToString(bytes?: number[]): string {
+  if (!bytes || bytes.length === 0) return ''
+  return new TextDecoder().decode(new Uint8Array(bytes))
+}
+
+function formatJson(str: string): string {
+  try {
+    return JSON.stringify(JSON.parse(str), null, 2)
+  } catch {
+    return str
+  }
+}
+
+function CollapsibleJson({ label, data, defaultExpanded = false }: { label: string; data?: number[]; defaultExpanded?: boolean }) {
+  const [expanded, setExpanded] = useState(defaultExpanded)
+  const [copied, setCopied] = useState(false)
+  const str = bytesToString(data)
+
+  if (!str) {
+    return (
+      <div className="text-sm">
+        <span className="text-[hsl(var(--muted-foreground))]">{label}:</span>{' '}
+        <span className="text-[hsl(var(--muted-foreground))]">N/A</span>
+      </div>
+    )
+  }
+
+  const formatted = formatJson(str)
+  const lines = formatted.split('\n')
+  const isLong = lines.length > 10 || str.length > 500
+
+  const handleCopy = async () => {
+    await navigator.clipboard.writeText(formatted)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }
+
+  return (
+    <div className="text-sm">
+      <div className="flex items-center gap-2 mb-1">
+        {isLong ? (
+          <button
+            onClick={() => setExpanded(!expanded)}
+            className="flex items-center gap-1 text-[hsl(var(--primary))] hover:underline"
+          >
+            {expanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRightIcon className="h-3 w-3" />}
+            {label}
+          </button>
+        ) : (
+          <span className="text-[hsl(var(--muted-foreground))]">{label}:</span>
+        )}
+        <button onClick={handleCopy} className="text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))]">
+          {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+        </button>
+      </div>
+      {!isLong || expanded ? (
+        <pre className="mt-1 max-h-64 overflow-auto rounded-md bg-[hsl(var(--muted))] p-2 text-xs font-mono whitespace-pre-wrap break-all">
+          {formatted}
+        </pre>
+      ) : (
+        <p className="text-xs text-[hsl(var(--muted-foreground))] truncate">{formatted.split('\n')[0]}...</p>
+      )}
+    </div>
+  )
+}
+
+function ResponseHeaderDisplay({ data }: { data?: Record<string, string[]> }) {
+  if (!data) {
+    return (
+      <div className="text-sm">
+        <span className="text-[hsl(var(--muted-foreground))]">Response Headers:</span>{' '}
+        <span className="text-[hsl(var(--muted-foreground))]">N/A</span>
+      </div>
+    )
+  }
+
+  return (
+    <div className="text-sm">
+      <span className="text-[hsl(var(--muted-foreground))]">Response Headers:</span>
+      <div className="mt-1 max-h-32 overflow-auto rounded-md bg-[hsl(var(--muted))] p-2 text-xs font-mono">
+        {Object.entries(data).map(([key, values]) => (
+          <div key={key}>
+            <span className="text-[hsl(var(--primary))]">{key}:</span>{' '}
+            {Array.isArray(values) ? values.join(', ') : values}
+          </div>
+        ))}
+      </div>
+    </div>
+  )
 }
 
 export function LogsPage() {
@@ -296,7 +392,7 @@ export function LogsPage() {
             className="fixed inset-0 bg-black/50"
             onClick={() => setDetailModalVisible(false)}
           />
-          <div className="relative z-50 w-full max-w-3xl rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-6 shadow-lg">
+          <div className="relative z-50 w-full max-w-4xl max-h-[90vh] overflow-auto rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-6 shadow-lg">
             <div className="mb-4 flex items-center justify-between">
               <h2 className="text-xl font-semibold">Request Details</h2>
               <Button variant="ghost" size="sm" onClick={() => setDetailModalVisible(false)}>
@@ -341,6 +437,24 @@ export function LogsPage() {
 
               <Card>
                 <CardHeader>
+                  <CardTitle className="text-base">Request Body</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <CollapsibleJson label="Request Body" data={selectedLog.request_body} defaultExpanded={false} />
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base">Response Body</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <CollapsibleJson label="Response Body" data={selectedLog.response_body} defaultExpanded={false} />
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
                   <CardTitle className="text-base">Provider Calls</CardTitle>
                 </CardHeader>
                 <CardContent>
@@ -349,44 +463,33 @@ export function LogsPage() {
                       No provider calls recorded
                     </p>
                   ) : (
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Provider</TableHead>
-                          <TableHead>Model</TableHead>
-                          <TableHead>Status</TableHead>
-                          <TableHead>Duration</TableHead>
-                          <TableHead>Retry</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {providerCalls.map((call) => (
-                          <TableRow key={call.id}>
-                            <TableCell className="font-mono text-sm">{call.provider_id}</TableCell>
-                            <TableCell>{call.model}</TableCell>
-                            <TableCell>
-                              <Badge
-                                variant={
-                                  call.response_code >= 200 && call.response_code < 300
-                                    ? 'success'
-                                    : 'destructive'
-                                }
-                              >
-                                {call.response_code}
-                              </Badge>
-                            </TableCell>
-                            <TableCell>{call.duration}ms</TableCell>
-                            <TableCell>
-                              {call.is_retry ? (
-                                <Badge variant="warning">Yes</Badge>
-                              ) : (
-                                'No'
-                              )}
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
+                    <div className="space-y-4">
+                      {providerCalls.map((call) => (
+                        <div key={call.id} className="rounded-md border border-[hsl(var(--border))] p-4">
+                          <div className="mb-3 flex items-center gap-4 text-sm">
+                            <span className="font-mono font-medium">{call.provider_id}</span>
+                            <span>{call.model}</span>
+                            <Badge
+                              variant={
+                                call.response_code >= 200 && call.response_code < 300
+                                  ? 'success'
+                                  : 'destructive'
+                              }
+                            >
+                              {call.response_code}
+                            </Badge>
+                            <span>{call.duration}ms</span>
+                            {call.is_retry && <Badge variant="warning">Retry</Badge>}
+                            {call.error && <span className="text-destructive">{call.error}</span>}
+                          </div>
+                          <div className="space-y-2">
+                            <CollapsibleJson label="Request Body" data={call.request_body} defaultExpanded={false} />
+                            <ResponseHeaderDisplay data={call.response_header} />
+                            <CollapsibleJson label="Response Body" data={call.response_body} defaultExpanded={false} />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
                   )}
                 </CardContent>
               </Card>

@@ -123,13 +123,16 @@ func (h *ProxyHandler) handleProxy(c *gin.Context) {
 		// Log error but don't fail the request
 		slog.Error("Failed to create request log", "error", logErr)
 	}
+	var finalResponseBody []byte
 	defer func() {
 		if requestLog != nil {
 			status := "success"
-			if c.Writer.Status() >= 400 {
+			if c.Request.Context().Err() == context.Canceled {
+				status = "canceled"
+			} else if c.Writer.Status() >= 400 {
 				status = "failed"
 			}
-			if err := h.logService.CompleteRequest(requestLog, status); err != nil {
+			if err := h.logService.CompleteRequest(requestLog, status, finalResponseBody); err != nil {
 				slog.Error("Failed to complete request log", "error", err)
 			}
 		}
@@ -264,6 +267,19 @@ func (h *ProxyHandler) handleProxy(c *gin.Context) {
 				return
 			}
 			resp.Body.Close()
+			
+			// Log provider call end with error response
+			if providerCall != nil {
+				headerJSON, marshalErr := json.Marshal(resp.Header)
+				if marshalErr != nil {
+					slog.Warn("Failed to marshal response headers for logging", "error", marshalErr)
+				}
+				if logErr := h.logService.LogProviderCallEnd(providerCall, resp.StatusCode, headerJSON, bs, callDuration, nil); logErr != nil {
+					slog.Error("Failed to log provider call end", "error", logErr)
+				}
+			}
+			finalResponseBody = bs
+			
 			c.Writer.Write(bs)
 			return
 		}
@@ -274,8 +290,21 @@ func (h *ProxyHandler) handleProxy(c *gin.Context) {
 			_, sseSpan := trace.StartSpan(c.Request.Context(), "sse stream")
 			copyResponseHeaders(c, resp.Header)
 			c.Status(resp.StatusCode)
-			proxySSE(c, resp.Body)
+			respBody := proxySSE(c, resp.Body)
 			sseSpan.End()
+			
+			// Log provider call end with stream response
+			if providerCall != nil {
+				headerJSON, marshalErr := json.Marshal(resp.Header)
+				if marshalErr != nil {
+					slog.Warn("Failed to marshal response headers for logging", "error", marshalErr)
+				}
+				if logErr := h.logService.LogProviderCallEnd(providerCall, resp.StatusCode, headerJSON, respBody, callDuration, nil); logErr != nil {
+					slog.Error("Failed to log provider call end", "error", logErr)
+				}
+			}
+			finalResponseBody = respBody
+			
 			return
 		}
 
@@ -288,6 +317,7 @@ func (h *ProxyHandler) handleProxy(c *gin.Context) {
 		copyResponseHeaders(c, resp.Header)
 		c.Status(resp.StatusCode)
 		c.Writer.Write(respBody)
+		finalResponseBody = respBody
 		return
 	}
 }
@@ -496,20 +526,22 @@ func getHttpClient(isStream bool) *http.Client {
 	return restHttpClient
 }
 
-func proxySSE(c *gin.Context, reader io.Reader) {
+func proxySSE(c *gin.Context, reader io.Reader) []byte {
 	ctx := c.Request.Context()
 
 	flusher, _ := c.Writer.(http.Flusher)
 	buf := make([]byte, 4096)
+	var captured []byte
 	for {
 		select {
 		case <-ctx.Done():
-			return
+			return captured
 		default:
 		}
 
 		n, err := reader.Read(buf)
 		if n > 0 {
+			captured = append(captured, buf[:n]...)
 			c.Writer.Write(buf[:n])
 			flusher.Flush()
 			c.Writer.Flush()
@@ -518,4 +550,5 @@ func proxySSE(c *gin.Context, reader io.Reader) {
 			break
 		}
 	}
+	return captured
 }
