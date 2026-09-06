@@ -282,6 +282,8 @@ export function LogsPage() {
               <option value="">All Statuses</option>
               <option value="success">Success</option>
               <option value="failed">Failed</option>
+              <option value="canceled">Canceled</option>
+              <option value="interrupted">Interrupted</option>
             </select>
             <Input
               placeholder="Filter by model"
@@ -325,7 +327,15 @@ export function LogsPage() {
                       </TableCell>
                       <TableCell>{log.model}</TableCell>
                       <TableCell>
-                        <Badge variant={log.status === 'success' ? 'success' : 'destructive'}>
+                        <Badge
+                          variant={
+                            log.status === 'success'
+                              ? 'success'
+                              : log.status === 'canceled' || log.status === 'interrupted'
+                              ? 'warning'
+                              : 'destructive'
+                          }
+                        >
                           {log.status}
                         </Badge>
                       </TableCell>

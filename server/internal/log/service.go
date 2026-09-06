@@ -97,3 +97,9 @@ func (s *Service) GetProviderCallsByRequestLogID(requestLogID uint) ([]ProviderC
 func (s *Service) DeleteLogs(cutoff time.Time) (int64, error) {
 	return s.store.DeleteBefore(cutoff)
 }
+
+// MarkPendingAsInterrupted updates all request logs with status "pending" to "interrupted".
+// This should be called on server startup to handle requests that were in-flight.
+func (s *Service) MarkPendingAsInterrupted() (int64, error) {
+	return s.store.MarkPendingAsInterrupted()
+}

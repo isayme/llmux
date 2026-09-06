@@ -59,6 +59,13 @@ func main() {
 
 	logService := log.NewService(logStore)
 
+	// Mark pending requests as interrupted (from previous server session)
+	if count, err := logService.MarkPendingAsInterrupted(); err != nil {
+		slog.Error("Failed to mark pending requests as interrupted", "error", err)
+	} else if count > 0 {
+		slog.Info("Marked pending requests as interrupted", "count", count)
+	}
+
 	// Start cleaner if logging is enabled
 	if loggingCfg.Enabled {
 		cleanInterval, _ := time.ParseDuration(loggingCfg.CleanInterval)
