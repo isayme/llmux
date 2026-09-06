@@ -18,8 +18,8 @@ interface RequestLog {
   api_key_id: string
   duration: number
   status: string
-  request_body?: number[]
-  response_body?: number[]
+  request_body?: number[] | string
+  response_body?: number[] | string
 }
 
 interface ProviderCall {
@@ -31,13 +31,22 @@ interface ProviderCall {
   duration: number
   is_retry: boolean
   error: string
-  request_body?: number[]
-  response_header?: Record<string, string[]>
-  response_body?: number[]
+  request_body?: number[] | string
+  response_header?: Record<string, string[]> | string
+  response_body?: number[] | string
 }
 
-function bytesToString(bytes?: number[]): string {
-  if (!bytes || bytes.length === 0) return ''
+function bytesToString(bytes?: number[] | string): string {
+  if (!bytes) return ''
+  if (typeof bytes === 'string') {
+    // Handle base64 encoded string from Go's []byte
+    try {
+      return atob(bytes)
+    } catch {
+      return bytes
+    }
+  }
+  if (bytes.length === 0) return ''
   return new TextDecoder().decode(new Uint8Array(bytes))
 }
 
@@ -49,7 +58,7 @@ function formatJson(str: string): string {
   }
 }
 
-function CollapsibleJson({ label, data, defaultExpanded = false }: { label: string; data?: number[]; defaultExpanded?: boolean }) {
+function CollapsibleJson({ label, data, defaultExpanded = false }: { label: string; data?: number[] | string; defaultExpanded?: boolean }) {
   const [expanded, setExpanded] = useState(defaultExpanded)
   const [copied, setCopied] = useState(false)
   const str = bytesToString(data)
@@ -102,8 +111,22 @@ function CollapsibleJson({ label, data, defaultExpanded = false }: { label: stri
   )
 }
 
-function ResponseHeaderDisplay({ data }: { data?: Record<string, string[]> }) {
-  if (!data) {
+function parseResponseHeader(data?: Record<string, string[]> | string): Record<string, string[]> | null {
+  if (!data) return null
+  if (typeof data === 'string') {
+    try {
+      const decoded = atob(data)
+      return JSON.parse(decoded)
+    } catch {
+      return null
+    }
+  }
+  return data
+}
+
+function ResponseHeaderDisplay({ data }: { data?: Record<string, string[]> | string }) {
+  const parsed = parseResponseHeader(data)
+  if (!parsed) {
     return (
       <div className="text-sm">
         <span className="text-[hsl(var(--muted-foreground))]">Response Headers:</span>{' '}
@@ -116,7 +139,7 @@ function ResponseHeaderDisplay({ data }: { data?: Record<string, string[]> }) {
     <div className="text-sm">
       <span className="text-[hsl(var(--muted-foreground))]">Response Headers:</span>
       <div className="mt-1 max-h-32 overflow-auto rounded-md bg-[hsl(var(--muted))] p-2 text-xs font-mono">
-        {Object.entries(data).map(([key, values]) => (
+        {Object.entries(parsed).map(([key, values]) => (
           <div key={key}>
             <span className="text-[hsl(var(--primary))]">{key}:</span>{' '}
             {Array.isArray(values) ? values.join(', ') : values}
