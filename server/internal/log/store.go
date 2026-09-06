@@ -15,7 +15,7 @@ type Store struct {
 // NewStore opens (or creates) the SQLite database at dbPath and auto-migrates
 // the RequestLog and ProviderCall tables.
 func NewStore(dbPath string) (*Store, error) {
-	db, err := gorm.Open(sqlite.Open(dbPath), &gorm.Config{})
+	db, err := gorm.Open(sqlite.Open(dbPath+"?_journal_mode=WAL&_busy_timeout=5000"), &gorm.Config{})
 	if err != nil {
 		return nil, err
 	}

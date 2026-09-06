@@ -118,12 +118,9 @@ func (h *ProxyHandler) handleProxy(c *gin.Context) {
 	// Start logging
 	requestID := uuid.New().String()
 	apiKeyID := GetAPIKey(c)
-	slog.Info("Starting request log", "requestID", requestID, "model", rawModel, "method", c.Request.Method, "path", c.Request.URL.Path)
 	requestLog, logErr := h.logService.StartRequest(requestID, rawModel, rawModel, c.Request.Method, c.Request.URL.Path, bodyBytes, c.ClientIP(), apiKeyID)
 	if logErr != nil {
 		slog.Error("Failed to create request log", "error", logErr)
-	} else {
-		slog.Info("Request log created", "requestID", requestID, "logID", requestLog.ID)
 	}
 	var finalResponseBody []byte
 	defer func() {
@@ -134,12 +131,9 @@ func (h *ProxyHandler) handleProxy(c *gin.Context) {
 			} else if c.Writer.Status() >= 400 {
 				status = "failed"
 			}
-			slog.Info("Completing request log", "requestID", requestLog.RequestID, "status", status, "responseBodyLen", len(finalResponseBody))
 			if err := h.logService.CompleteRequest(requestLog, status, finalResponseBody); err != nil {
 				slog.Error("Failed to complete request log", "error", err)
 			}
-		} else {
-			slog.Warn("requestLog is nil, skipping CompleteRequest", "requestID", requestID)
 		}
 	}()
 
