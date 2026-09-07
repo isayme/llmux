@@ -3,6 +3,10 @@ package log
 import (
 	"time"
 
+	"llmux/internal/config"
+
+	"gorm.io/driver/mysql"
+	"gorm.io/driver/postgres"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
@@ -12,24 +16,36 @@ type Store struct {
 	db *gorm.DB
 }
 
-// NewStore opens (or creates) the SQLite database at dbPath and auto-migrates
+// NewStore opens (or creates) the database and auto-migrates
 // the RequestLog and ProviderCall tables.
-func NewStore(dbPath string) (*Store, error) {
-	db, err := gorm.Open(sqlite.Open(dbPath), &gorm.Config{})
+func NewStore(cfg config.LoggingConfig) (*Store, error) {
+	var dialector gorm.Dialector
+	switch cfg.Type {
+	case "mysql":
+		dialector = mysql.Open(cfg.DSN)
+	case "postgres":
+		dialector = postgres.Open(cfg.DSN)
+	default: // sqlite
+		dialector = sqlite.Open(cfg.DSN)
+	}
+
+	db, err := gorm.Open(dialector, &gorm.Config{})
 	if err != nil {
 		return nil, err
 	}
 
-	// Enable WAL mode and set busy timeout for concurrent access
-	sqlDB, err := db.DB()
-	if err != nil {
-		return nil, err
-	}
-	if _, err := sqlDB.Exec("PRAGMA journal_mode=WAL"); err != nil {
-		return nil, err
-	}
-	if _, err := sqlDB.Exec("PRAGMA busy_timeout=5000"); err != nil {
-		return nil, err
+	// SQLite-specific: enable WAL mode and busy timeout
+	if cfg.Type == "sqlite" || cfg.Type == "" {
+		sqlDB, err := db.DB()
+		if err != nil {
+			return nil, err
+		}
+		if _, err := sqlDB.Exec("PRAGMA journal_mode=WAL"); err != nil {
+			return nil, err
+		}
+		if _, err := sqlDB.Exec("PRAGMA busy_timeout=5000"); err != nil {
+			return nil, err
+		}
 	}
 
 	if err := db.AutoMigrate(&RequestLog{}, &ProviderCall{}); err != nil {

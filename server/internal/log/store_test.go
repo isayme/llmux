@@ -5,13 +5,15 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"llmux/internal/config"
 )
 
 func TestNewStore(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 
-	store, err := NewStore(dbPath)
+	store, err := NewStore(config.LoggingConfig{Type: "sqlite", DSN: dbPath})
 	if err != nil {
 		t.Fatalf("NewStore failed: %v", err)
 	}
@@ -30,7 +32,7 @@ func TestStoreCreateAndReadRequestLog(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 
-	store, err := NewStore(dbPath)
+	store, err := NewStore(config.LoggingConfig{Type: "sqlite", DSN: dbPath})
 	if err != nil {
 		t.Fatalf("NewStore failed: %v", err)
 	}
@@ -68,7 +70,7 @@ func newTestStore(t *testing.T) *Store {
 	t.Helper()
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
-	store, err := NewStore(dbPath)
+	store, err := NewStore(config.LoggingConfig{Type: "sqlite", DSN: dbPath})
 	if err != nil {
 		t.Fatalf("NewStore failed: %v", err)
 	}

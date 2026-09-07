@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	"llmux/internal/config"
+
 	"github.com/gin-gonic/gin"
 )
 
@@ -13,7 +15,7 @@ func TestListRequestLogs(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 
-	store, err := NewStore(dbPath)
+	store, err := NewStore(config.LoggingConfig{Type: "sqlite", DSN: dbPath})
 	if err != nil {
 		t.Fatalf("NewStore failed: %v", err)
 	}
@@ -49,7 +51,7 @@ func TestGetRequestLogInvalidID(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 
-	store, err := NewStore(dbPath)
+	store, err := NewStore(config.LoggingConfig{Type: "sqlite", DSN: dbPath})
 	if err != nil {
 		t.Fatalf("NewStore failed: %v", err)
 	}
@@ -76,7 +78,7 @@ func TestGetRequestLogNotFound(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 
-	store, err := NewStore(dbPath)
+	store, err := NewStore(config.LoggingConfig{Type: "sqlite", DSN: dbPath})
 	if err != nil {
 		t.Fatalf("NewStore failed: %v", err)
 	}
@@ -103,7 +105,7 @@ func TestDeleteLogs(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 
-	store, err := NewStore(dbPath)
+	store, err := NewStore(config.LoggingConfig{Type: "sqlite", DSN: dbPath})
 	if err != nil {
 		t.Fatalf("NewStore failed: %v", err)
 	}

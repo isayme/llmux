@@ -5,13 +5,15 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"llmux/internal/config"
 )
 
 func TestLogServiceStartRequest(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 
-	store, err := NewStore(dbPath)
+	store, err := NewStore(config.LoggingConfig{Type: "sqlite", DSN: dbPath})
 	if err != nil {
 		t.Fatalf("NewStore failed: %v", err)
 	}
@@ -39,7 +41,7 @@ func TestLogServiceCompleteRequest(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 
-	store, err := NewStore(dbPath)
+	store, err := NewStore(config.LoggingConfig{Type: "sqlite", DSN: dbPath})
 	if err != nil {
 		t.Fatalf("NewStore failed: %v", err)
 	}
@@ -71,7 +73,7 @@ func TestLogServiceLogProviderCallEnd(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 
-	store, err := NewStore(dbPath)
+	store, err := NewStore(config.LoggingConfig{Type: "sqlite", DSN: dbPath})
 	if err != nil {
 		t.Fatalf("NewStore failed: %v", err)
 	}
@@ -117,7 +119,7 @@ func TestLogServiceLogProviderCallEndWithError(t *testing.T) {
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 
-	store, err := NewStore(dbPath)
+	store, err := NewStore(config.LoggingConfig{Type: "sqlite", DSN: dbPath})
 	if err != nil {
 		t.Fatalf("NewStore failed: %v", err)
 	}

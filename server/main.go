@@ -50,7 +50,7 @@ func main() {
 
 	// Initialize logging
 	loggingCfg := config.Get().Logging
-	logStore, err := log.NewStore(loggingCfg.DBPath)
+	logStore, err := log.NewStore(loggingCfg)
 	if err != nil {
 		slog.Error("Failed to initialize log store", "error", err)
 		return

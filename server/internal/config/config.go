@@ -111,8 +111,14 @@ type LoggingConfig struct {
 	// CleanInterval interval for cleaning old logs
 	CleanInterval string `json:"clean_interval" mapstructure:"clean_interval"`
 
-	// DBPath path to SQLite database file
-	DBPath string `json:"db_path" mapstructure:"db_path"`
+	// Database type: sqlite, mysql, postgres
+	Type string `json:"type" mapstructure:"type"`
+
+	// DSN data source name (driver-native format)
+	// SQLite: ./llmux.db
+	// MySQL: user:pass@tcp(127.0.0.1:3306)/llmux?charset=utf8mb4&parseTime=True
+	// PostgreSQL: host=localhost user=llmux dbname=llmux sslmode=disable
+	DSN string `json:"dsn" mapstructure:"dsn"`
 }
 
 // TraceConfig trace configuration
@@ -159,7 +165,8 @@ func LoadConfig() error {
 	viper.SetDefault("logging.enabled", true)
 	viper.SetDefault("logging.retention_days", 7)
 	viper.SetDefault("logging.clean_interval", "1h")
-	viper.SetDefault("logging.db_path", "./llmux.db")
+	viper.SetDefault("logging.type", "sqlite")
+	viper.SetDefault("logging.dsn", "./llmux.db")
 
 	if err := viper.ReadInConfig(); err != nil {
 		slog.Info("read config failed", "err", err)
