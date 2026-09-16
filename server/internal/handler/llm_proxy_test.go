@@ -31,8 +31,13 @@ func setupProxyTestConfig(t *testing.T, providers map[string]*config.ProviderCon
 		t.Fatal(err)
 	}
 
-	cfgContent := "server:\n  port: 8080\n  master_key: test\n  session:\n    secret_key: test-secret\n    cookie_name: llmux_sid\n    max_age: 86400\nlogging:\n  enabled: true\n  type: sqlite\n  dsn: " + tmpDir + "/test.db + \"\n\""
-	if err := os.WriteFile(tmpDir+"/config.yaml", []byte(cfgContent), 0644); err != nil {
+	// Copy test config file to temp directory
+	src, err := os.ReadFile("../../config/test.yaml")
+	if err != nil {
+		os.RemoveAll(tmpDir)
+		t.Fatalf("Failed to read test config: %v", err)
+	}
+	if err := os.WriteFile(tmpDir+"/config.yaml", src, 0644); err != nil {
 		os.RemoveAll(tmpDir)
 		t.Fatal(err)
 	}

@@ -22,8 +22,13 @@ func setupTestConfig(t *testing.T, apiKeys []*config.ApiKeyConfig) func() {
 		t.Fatal(err)
 	}
 
-	cfgContent := "server:\n  port: 8080\n  master_key: test\n"
-	if err := os.WriteFile(tmpDir+"/config.yaml", []byte(cfgContent), 0644); err != nil {
+	// Copy test config file to temp directory
+	src, err := os.ReadFile("../../config/test.yaml")
+	if err != nil {
+		os.RemoveAll(tmpDir)
+		t.Fatalf("Failed to read test config: %v", err)
+	}
+	if err := os.WriteFile(tmpDir+"/config.yaml", src, 0644); err != nil {
 		os.RemoveAll(tmpDir)
 		t.Fatal(err)
 	}

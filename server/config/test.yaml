@@ -1,0 +1,23 @@
+server:
+  port: 8080
+  master_key: test
+  session:
+    secret_key: test-secret
+    cookie_name: llmux_sid
+    max_age: 86400
+
+logging:
+  enabled: true
+  type: sqlite
+  dsn: "./test.db"
+  retention_days: 7
+  clean_interval: "1h"
+
+trace:
+  enabled: false
+  exporter: stdout
+  endpoint: ""
+  sampling:
+    ratio: 1.0
+    force_on_error: true
+    force_on_latency: 5s
