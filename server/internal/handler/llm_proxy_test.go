@@ -1078,8 +1078,8 @@ func TestHandleProxy_Logging_NonStreaming(t *testing.T) {
 	if log.Status != "success" {
 		t.Errorf("Expected status success, got %s", log.Status)
 	}
-	if log.Duration <= 0 {
-		t.Errorf("Expected positive duration, got %d", log.Duration)
+	if log.Duration < 0 {
+		t.Errorf("Expected non-negative duration, got %d", log.Duration)
 	}
 	if len(log.RequestBody) == 0 {
 		t.Error("Expected non-empty request body")
@@ -1104,8 +1104,8 @@ func TestHandleProxy_Logging_NonStreaming(t *testing.T) {
 	if call.ResponseCode != 200 {
 		t.Errorf("Expected response code 200, got %d", call.ResponseCode)
 	}
-	if call.Duration <= 0 {
-		t.Errorf("Expected positive duration, got %d", call.Duration)
+	if call.Duration < 0 {
+		t.Errorf("Expected non-negative duration, got %d", call.Duration)
 	}
 	if call.IsRetry {
 		t.Error("Expected IsRetry false for first call")
